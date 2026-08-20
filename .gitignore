@@ -1,0 +1,40 @@
+# Model checkpoints / weights — never commit these
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# Downloaded HF repos
+bris-models/
+bris-forecaster/
+bris-forecaster-pretrained/
+.hf-cache/
+
+# Data
+*.zarr/
+*.grib
+*.grib2
+*.nc
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Slurm
+slurm-*.out
+slurm-*.err
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# scratch
+_to_delete/
