@@ -161,6 +161,44 @@ share the recipes they used. That would replace days of dataset engineering with
 and it also settles whether ERA5 is an acceptable substitute for `od` in their
 view. Building from scratch is the fallback, not the obvious first move.
 
+## 4c. Inference needs initial conditions, not the training archive
+
+An easy and expensive thing to get wrong. Running one forecast does **not**
+require the datasets Bris was trained on.
+
+| | states | volume |
+|---|---|---|
+| Training archive | 2020-2023+, 6-hourly, both grids | TB scale |
+| **One forecast** | **2** (t-6h, t0) | **~1.1 GB** |
+
+At 89 fields x 2 states x float32: MEPS 949 x 1069 = 0.72 GB, N320 = 0.39 GB.
+That is small enough to build on demand and throw away, which suits a cluster
+with no long-term storage.
+
+Two conditions make this more than a download:
+
+**Format.** It must be an anemoi-datasets zarr that `cutout` can open — the
+config reads through anemoi-datasets, not raw GRIB. So still
+`anemoi-datasets create`, just over a two-state range rather than an archive.
+
+**Grid geometry — the actual risk.** `switch_graph: null` means the model uses
+the graph baked into the checkpoint, which encodes fixed node positions for the
+stretched grid. The MEPS dataset must therefore match MET's domain, projection
+and 949 x 1069 extent exactly, or the graph will not align with the data. N320
+is safe because it is a standard grid; MEPS is MET's own domain and is not.
+
+The 949 x 1069 figure is back-derived from `CRPSFFTLoss` (xdim 849, ydim 969,
+which are post-`trim_edge: 50`), so it is inferred rather than stated anywhere.
+Confirm it before building.
+
+### Unverified: where normalisation statistics come from
+
+The checkpoint carries statistics, and Anemoi normally uses those at inference.
+But if any code path recomputes them from the input dataset instead, statistics
+derived from two timesteps would be meaningless — and the failure mode is a run
+that completes and writes physically wrong fields rather than one that errors.
+Check this before trusting a first forecast.
+
 ## 5. Sanity checks on the output
 
 Per `routing`, two NetCDF files are written per run — a `nordic_` file on the
