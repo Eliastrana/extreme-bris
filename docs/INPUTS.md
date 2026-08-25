@@ -46,25 +46,42 @@ geopotential) and as a pressure-level field. Keep them distinct when building.
 
 ### Confirmed from the checkpoint (2026-08-25)
 
-The first successful metadata dump on eX3 gives the split:
+Read out of `bris-crpsfft_inference.ckpt` on eX3, not inferred from YAML:
 
-| group | count |
-|---|---|
-| prognostic | 84 |
-| forcing | 11 |
-| diagnostic | 3 — `tp`, `ssrd`, `strd` |
-| **total** | **98** |
+| group | count | contents |
+|---|---|---|
+| prognostic | 84 | evolved and fed back each step |
+| forcing | 11 | 9 computed + `lsm`, `z` |
+| diagnostic | 3 | `tp`, `ssrd`, `strd` — predicted, never fed back |
+| **model input** | **95** | prognostic + forcing |
+| **model output** | **87** | prognostic + diagnostic |
 
-This reconciles with the config: 98 matches `selected_vars`, and the 11 forcings
-are the 9 computed terms plus the two static fields `lsm` and `z`.
+The "87 variables" figure in the project notes is the **output** count.
 
-Model **inputs** are prognostic + forcing = **95**. Model **outputs** are
-prognostic + diagnostic = **87** — which is where the "87 variables" figure
-comes from. It is the output count, not the input count.
+What the **dataset** must store is a third number: **89**. The 9 sin/cos and
+insolation terms are computed at load time, so from disk we need
+84 prognostic + `lsm` + `z` + the 3 diagnostics = 89 fields.
 
-`tp` being diagnostic matters for this project specifically: precipitation is
-predicted but not fed back into the next step, so a tail-aware loss on `tp` acts
-on a diagnostic head rather than on the recurrent state.
+    89 stored  ->  +9 computed  =  95 model inputs  ->  87 outputs
+
+`tp` being **diagnostic** matters for this project directly: precipitation is
+predicted but never fed back into the recurrent state. A tail-aware `twCRPS`
+term on `tp` therefore acts on a diagnostic head, with a shorter and more
+isolated gradient path than a prognostic variable would have. Worth knowing
+before designing the loss, and a point in favour of a decoder-only fine-tune.
+
+### multistep_input = 2
+
+**One forecast needs two consecutive analysis times, not one.** For an
+initialisation at `2025-04-01T00:00`, both of these must exist in the dataset:
+
+    2025-03-31T18:00    (t-6h)
+    2025-04-01T00:00    (t0)
+
+This applies to both sides of the cutout — MEPS and the global N320 — and it
+doubles the minimum data pull. Still trivial in volume, but it is a correctness
+requirement rather than a convenience: initialising from a single state will
+either fail outright or silently produce a garbage first step.
 
 ## 3. Time steps
 
