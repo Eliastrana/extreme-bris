@@ -57,6 +57,55 @@ Both HF repos are Apache 2.0. Checkpoints are gitignored — do not commit them.
 Training requires the fork with the FFT-CRPS loss, since upstream Anemoi does
 not ship it: `evenmn/anemoi-core`, branch `feat/crps-fft-loss`.
 
+## Running Bris on eX3
+
+    ./scripts/download_models.sh -c            # configs first, ~16 KB
+    ./scripts/download_models.sh               # checkpoints, 4.7 GB total
+    ./scripts/setup_env.sh                     # build the pinned env (on a GPU node)
+    python scripts/inspect_checkpoint.py ~/bris-models/bris-forecaster/bris-crpsfft_inference.ckpt
+    mkdir -p logs && sbatch bris/slurm/bris_inference.sbatch
+
+See [docs/INPUTS.md](docs/INPUTS.md) for what the model needs as input and how we
+plan to assemble it without MARS access.
+
+### Findings that changed the plan
+
+Read before spending cluster time — four things are not as the published
+material suggests.
+
+**The runner is `bris`, not `anemoi-inference`.** `config_inference.yaml`
+targets `bris.model.brispredictor.BrisPredictor`, and `anemoi-inference` is not
+in the dependency set at all. The `anemoi-inference run <config>` invocation
+belongs to `met-no/bris-forecaster-pretrained`, which is a different model.
+
+**`bris-forecaster-pretrained` ships no checkpoint.** The repo contains only
+configs, `pyproject.toml`, `uv.lock` and a README; its inference config points
+at a path on Leonardo. There is no lighter global model to smoke-test against —
+the CRPS-FFT checkpoint is the only published weight set, so it is also the
+first thing that has to work.
+
+**Inference wants 8 GPUs, not 1.** `num_gpus_per_model: 4` with
+`num_members: 2` — the model is sharded across four cards and two ensemble
+members run alongside, which is exactly one 4124GO-NART node. Whether it fits on
+fewer cards on 80 GB A100s is worth testing, but it is not a single-GPU job by
+default.
+
+**`uv sync --locked` will fail without a workaround.** The lockfile pins the
+inference package over SSH:
+
+    bris = { git = "ssh://git@github.com/metno/bris-inference.git", rev = "d1d27c1..." }
+
+which needs a GitHub SSH key on the compute node. The repo is public, so
+`scripts/setup_env.sh` adds a git `insteadOf` rewrite to HTTPS. That leaves the
+URL string in `uv.lock` untouched, so `--locked` still validates.
+
+### Open questions
+
+- Slurm partition name for the 8x A100 80 GB node — `sinfo` on eX3.
+- `multistep_input` is unset in both configs, so it defaults to 2 (t-6h and t0).
+  Confirm from the checkpoint before building initial conditions.
+- Node walltime limits, which is why the Slurm script resumes by date marker.
+
 ## References
 
 - Nordhagen et al., *High-Resolution Probabilistic Data-Driven Weather Modeling

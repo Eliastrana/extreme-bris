@@ -1,0 +1,109 @@
+# Minimum input for a single Bris forecast
+
+What the CRPS-FFT checkpoint needs in order to produce one forecast, and how we
+intend to assemble it on eX3 without MARS access.
+
+Everything below is read off `configs/config_inference.yaml` and
+`configs/config_training.yaml` in `met-no/bris-forecaster`. Where the configs
+are silent, that is stated rather than guessed — the authoritative source is the
+checkpoint itself, which is what `scripts/inspect_checkpoint.py` is for. **Run
+that before building any data.**
+
+## 1. Two datasets, combined as a cutout
+
+Bris is a stretched-grid model. The input is a `cutout` of two zarr datasets:
+
+| Role | Config key | Grid | Notes |
+|---|---|---|---|
+| Inner / LAM | `dataset_lam` | MEPS 2.5 km | `trim_edge: 50` |
+| Outer / global | `dataset_global` | N320 (~31 km) | `select: ${selected_vars}` |
+
+`trim_edge: 50` discards 50 cells from the MEPS boundary — roughly 125 km, the
+relaxation zone where the LAM is nudged toward its host model and is not
+physically trustworthy. This is not optional; it is part of how the model was
+trained.
+
+Both are combined with `min_distance_km: 0` and `adjust: all`.
+
+## 2. Variables
+
+`selected_vars` in the inference config lists **98** names. They split into:
+
+- **89 that must exist in the input data**
+  - 17 surface / single-level: `10u 10v 2d 2t hcc lcc mcc msl skt sp ssrd strd tcc tcw tp z`
+    plus `lsm`
+  - 6 upper-air fields on 12 pressure levels = 72:
+    `q t u v w z` at `50 100 150 200 250 300 400 500 700 850 925 1000` hPa
+- **9 computed by anemoi-datasets at load time**, not stored:
+  `cos_julian_day sin_julian_day cos_latitude sin_latitude cos_longitude
+  sin_longitude cos_local_time sin_local_time insolation`
+
+Note there is no 600 hPa level: the training config explicitly drops
+`u_600 v_600 w_600 q_600 z_600 t_600`, along with `sdor slor cp`.
+
+`z` appears twice with different meanings — as a surface field (orography
+geopotential) and as a pressure-level field. Keep them distinct when building.
+
+## 3. Time steps
+
+`timestep: 6h`, `frequency: 6h`, `leadtimes: 10` → a 60-hour forecast.
+
+The number of *input* states is not set in either config, so it falls back to
+the Anemoi default (`multistep_input: 2`, i.e. t-6h and t0). **Confirm this from
+the checkpoint before building initial conditions** — if it is 2, a single
+forecast needs two consecutive analysis times, not one.
+
+Volume is trivial either way: two states of 89 fields, not a training corpus.
+
+## 4. The data problem, and the substitution
+
+MET's global input is not one dataset but a **join**:
+
+```yaml
+join:
+  - dataset: ${...}/${hardware.files.dataset_atm}    # IFS operational analysis
+  - dataset: ${...}/${hardware.files.dataset_land}   # ERA5
+    select: [lcc, mcc, hcc, tcc, strd, ssrd]
+drop: [sdor, slor, cp, u_600, v_600, w_600, q_600, z_600, t_600]
+```
+
+| Source | Public? | Status |
+|---|---|---|
+| MEPS 2.5 km (`aifs-meps-2.5km-...-v7.zarr`) | yes, thredds.met.no | usable |
+| ERA5 N320 land/cloud/radiation | yes, via CDS | usable |
+| IFS `aifs-od-an-oper-...-n320` | **no** — MARS class `od` | applied for, not granted |
+
+So only the *atmospheric* part is blocked, and six of the surface fields
+(`lcc mcc hcc tcc strd ssrd`) already come from ERA5 in MET's own setup.
+
+**Plan: substitute ERA5 N320 (`ea`) for the IFS operational analysis (`od`).**
+Same grid, same variable names, public. The model was trained on `od`, so
+initialising from `ea` is a distribution shift and some skill loss is expected.
+That is acceptable for the current milestone, which is *the model runs and the
+output is physical* — not a verification score. It must be revisited before any
+result is quoted, and certainly before fine-tuning.
+
+## 5. Sanity checks on the output
+
+Per `routing`, two NetCDF files are written per run — a `nordic_` file on the
+MEPS domain and a `global_` file interpolated to 0.25°, each with `2t`, `msl`,
+`tp` and derived `ws`.
+
+- No NaNs anywhere.
+- `2t` in a plausible Kelvin range; `msl` around 950–1050 hPa.
+- `tp` **exactly zero** in dry areas, never slightly negative — the model applies
+  `ReluBounding` to precipitation. Small negatives would mean the bounding did
+  not load, i.e. something is wrong with the checkpoint or config.
+- Cloud fractions `tcc/hcc/mcc/lcc` within [0, 1] — `HardtanhBounding`.
+- The LAM/global seam should be continuous. A visible discontinuity is the first
+  thing to look for if the cutout or `trim_edge` is misconfigured.
+
+## 6. Storage
+
+eX3 offers **no long-term storage**, and BeeGFS is hybrid spinning disk + SSD.
+
+- Checkpoints (1.45 GB inference, 3.29 GB training) on BeeGFS: fine.
+- Input zarr: stage to **node-local NVMe** (30 TB on the 4124GO-NART) before the
+  run. Do not stream from BeeGFS.
+- Treat anything on the cluster as ephemeral; keep the reproducible recipe here
+  in git, not the data.
