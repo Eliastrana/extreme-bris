@@ -41,6 +41,12 @@ Both are combined with `min_distance_km: 0` and `adjust: all`.
 Note there is no 600 hPa level: the training config explicitly drops
 `u_600 v_600 w_600 q_600 z_600 t_600`, along with `sdor slor cp`.
 
+The reason is archival, not a modelling choice. Ingstad et al. (HourGlass,
+arXiv:2607.11457) state it directly, explaining why they could not fine-tune
+Bris-HourGlass from the global model: *"MEPS does not have the 600 hPa pressure
+level variables."* Any MEPS dataset built here will have the same gap by
+construction, so the drop list is not something to try to fill in.
+
 `z` appears twice with different meanings — as a surface field (orography
 geopotential) and as a pressure-level field. Keep them distinct when building.
 
@@ -145,9 +151,13 @@ It emits 89 stored fields, 17 surface and 6 x 12 upper-air, over the two states
 `multistep_input: 2` requires. The `input:` stanza still needs checking against
 the installed anemoi-datasets version, and ERA5 needs CDS credentials.
 
-**Worth doing first: ask MET.** The Bris authors (Nordhagen et al.,
-arXiv:2511.23043) built these datasets and may simply share them, or share the
-recipes they used. That would replace days of dataset engineering with an email,
+**Worth doing first: ask MET.** Neither the Bris paper (Nordhagen et al.,
+arXiv:2511.23043) nor the HourGlass paper (Ingstad et al., arXiv:2607.11457)
+carries a data availability statement — HourGlass publishes code only, pointing
+at `ecmwf/anemoi-core` branch `feature/ens_interp`. The datasets are described
+in prose and not released, so there is no published route to them and asking is
+the intended one. The authors built these datasets and may simply share them, or
+share the recipes they used. That would replace days of dataset engineering with an email,
 and it also settles whether ERA5 is an acceptable substitute for `od` in their
 view. Building from scratch is the fallback, not the obvious first move.
 
