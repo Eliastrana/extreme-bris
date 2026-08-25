@@ -158,7 +158,7 @@ else
     record "smoke" "ok" "$nc_count NetCDF file(s) written"
     echo "  done: $nc_count NetCDF file(s)"
   else
-    record "smoke" "FAILED" "see smoke-*.err" "$(ls -t "$LOG_DIR"/smoke-*.err 2>/dev/null | head -1)"
+    record "smoke" "FAILED" "see smoke-*.err" "$(ls -t "$LOG_DIR"/smoke-*.err 2>/dev/null | head -n 1)"
     echo "  FAILED (see $LOG_DIR/smoke-*.err)"
   fi
 fi
@@ -188,7 +188,7 @@ fi
     lg="${STEP_LOGS[$i]}"
     if [[ -n "$lg" && -f "$lg" ]]; then
       echo '```'
-      tail -25 "$lg"
+      tail -n 25 "$lg"
       echo '```'
     else
       echo "(no log captured)"
@@ -201,14 +201,19 @@ fi
     echo
     echo '```'
     echo "disk:"
-    df -h "$HOME" 2>/dev/null | tail -2
-    quota -s 2>/dev/null | tail -3 || echo "  (quota unavailable)"
+    df -h "$HOME" 2>/dev/null | tail -n 2
+    q="$(quota -s 2>/dev/null | tail -n 3)"
+    if [[ -n "$q" && "$q" != *"ask your administrator"* ]]; then
+      echo "$q"
+    else
+      echo "  (quota not reportable on this host)"
+    fi
     echo
     echo "reachability:"
     for u in https://pypi.org/simple/ https://files.pythonhosted.org/ \
              https://huggingface.co https://astral.sh; do
       printf "  %-34s " "$u"
-      curl -sS -m 10 -o /dev/null -w "HTTP %{http_code}\n" "$u" 2>&1 | tail -1
+      curl -sS -m 10 -o /dev/null -w "HTTP %{http_code}\n" "$u" 2>&1 | tail -n 1
     done
     echo
     echo "proxy env: ${http_proxy:-unset} / ${https_proxy:-unset}"
@@ -222,7 +227,7 @@ fi
     echo "Written to \`$META\`. Variable order and normalisation statistics:"
     echo
     echo '```'
-    head -40 "$LOG_DIR/metadata.log" 2>/dev/null
+    head -n 40 "$LOG_DIR/metadata.log" 2>/dev/null
     echo '```'
     echo
   fi

@@ -96,7 +96,7 @@ echo
 
 # --- warn on low disk space ------------------------------------------------
 
-avail_gb="$(df -BG --output=avail "$TARGET_DIR" 2>/dev/null | tail -1 | tr -dc '0-9' || echo "")"
+avail_gb="$(df -BG --output=avail "$TARGET_DIR" 2>/dev/null | tail -n 1 | tr -dc '0-9' || echo "")"
 if [[ -n "$avail_gb" && "$avail_gb" -lt 30 && "$CONFIGS_ONLY" -eq 0 ]]; then
   echo "WARNING: only ${avail_gb}G available at $TARGET_DIR." >&2
   echo "         Full checkpoints may not fit. Continuing anyway." >&2
