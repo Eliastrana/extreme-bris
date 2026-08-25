@@ -59,21 +59,32 @@ not ship it: `evenmn/anemoi-core`, branch `feat/crps-fft-loss`.
 
 ## Running Bris on eX3
 
-On the login node — light work only, eX3 asks for at most 8 threads there:
+    git clone https://github.com/Eliastrana/extreme-bris.git
+    cd extreme-bris
+    ./run.sh
 
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
-    uv tool install huggingface_hub
-    ./scripts/download_models.sh -c            # configs first, ~16 KB
-    ./scripts/download_models.sh               # checkpoints, 4.7 GB total
+That is the whole thing. `run.sh` installs `uv` and the HF CLI, downloads the
+checkpoints, builds the pinned environment, dumps the checkpoint metadata, and
+submits the GPU smoke job — continuing past any failure so one broken step does
+not mask the state of the rest. It writes `~/bris-runs/REPORT.md` and prints it.
 
-Everything heavier goes through the queue. Prefer `sbatch` over interactive
-`srun`: a forgotten interactive session can hold a GPU, which eX3 asks us not
-to do.
+    ./run.sh --no-gpu              # skip the GPU job
+    ./run.sh --mail you@uio.no     # also mail the report
 
-    mkdir -p logs
-    sbatch bris/slurm/setup_and_inspect.sbatch   # env + checkpoint metadata, CPU only
-    sbatch bris/slurm/bris_smoke.sbatch          # 1 GPU — needs input data first
+Network-dependent steps run on the login node with concurrency capped at 8
+threads, which is what eX3 asks for. That is deliberate: compute nodes may have
+no outbound internet, and finding that out inside a queued job wastes a
+scheduling round-trip. GPU work always goes through `sbatch`, never an
+interactive `srun`, so nothing can be left holding a card.
+
+The individual jobs remain available if you want to drive them by hand:
+
+    sbatch bris/slurm/setup_and_inspect.sbatch   # env + metadata, CPU only
+    sbatch bris/slurm/bris_smoke.sbatch          # 1 GPU, reduced config
+    sbatch bris/slurm/bris_inference.sbatch      # published config on hgx2q
+
+**Expect the smoke step to report `blocked` today.** There is no input data yet;
+that is the open work, not a misconfiguration.
 
 See [docs/INPUTS.md](docs/INPUTS.md) for what the model needs as input and how we
 plan to assemble it without MARS access.
