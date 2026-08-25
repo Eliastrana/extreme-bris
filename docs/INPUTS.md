@@ -44,6 +44,28 @@ Note there is no 600 hPa level: the training config explicitly drops
 `z` appears twice with different meanings — as a surface field (orography
 geopotential) and as a pressure-level field. Keep them distinct when building.
 
+### Confirmed from the checkpoint (2026-08-25)
+
+The first successful metadata dump on eX3 gives the split:
+
+| group | count |
+|---|---|
+| prognostic | 84 |
+| forcing | 11 |
+| diagnostic | 3 — `tp`, `ssrd`, `strd` |
+| **total** | **98** |
+
+This reconciles with the config: 98 matches `selected_vars`, and the 11 forcings
+are the 9 computed terms plus the two static fields `lsm` and `z`.
+
+Model **inputs** are prognostic + forcing = **95**. Model **outputs** are
+prognostic + diagnostic = **87** — which is where the "87 variables" figure
+comes from. It is the output count, not the input count.
+
+`tp` being diagnostic matters for this project specifically: precipitation is
+predicted but not fed back into the next step, so a tail-aware loss on `tp` acts
+on a diagnostic head rather than on the recurrent state.
+
 ## 3. Time steps
 
 `timestep: 6h`, `frequency: 6h`, `leadtimes: 10` → a 60-hour forecast.

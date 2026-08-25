@@ -133,7 +133,8 @@ if [[ ! -f "$CKPT" || ! -d "$BRIS_ENV_DIR/.venv" ]]; then
   echo "  skipped (missing checkpoint or environment)"
 elif (cd "$BRIS_ENV_DIR" && uv run python "$REPO_DIR/scripts/inspect_checkpoint.py" \
         "$CKPT" --json "$META") >"$LOG_DIR/metadata.log" 2>&1; then
-  nvars=$(grep -cE '^\s+[0-9]+\s+\S+$' "$LOG_DIR/metadata.log" 2>/dev/null || echo "?")
+  nvars=$(grep -cE '^ +[0-9]+ +[^ ]+$' "$LOG_DIR/metadata.log" 2>/dev/null) || nvars=0
+  [[ "$nvars" -gt 0 ]] || nvars="?"
   record "metadata" "ok" "$nvars variables dumped to $META"
   echo "  done: $nvars variables -> $META"
 else
@@ -236,7 +237,9 @@ fi
     echo "Written to \`$META\`. Variable order and normalisation statistics:"
     echo
     echo '```'
-    head -n 40 "$LOG_DIR/metadata.log" 2>/dev/null
+    # skip the per-variable listing, keep the groups and summary
+    sed -n '/^--- \(input\|output\|prognostic\|forcing\|diagnostic\|summary\|multistep\|resolution\|frequency\)/,$p' \
+        "$LOG_DIR/metadata.log" 2>/dev/null | head -n 60
     echo '```'
     echo
   fi

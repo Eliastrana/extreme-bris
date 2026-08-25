@@ -44,10 +44,13 @@ if BRIS_CA_BUNDLE="$(_bris_find_ca_bundle)"; then
   # curl
   export CURL_CA_BUNDLE="${CURL_CA_BUNDLE:-$BRIS_CA_BUNDLE}"
   # uv: use the platform trust store instead of its bundled webpki roots.
-  # The flag has been spelled --native-tls and --system-certs across versions;
-  # both env vars are set, and uv ignores the one it does not know.
-  export UV_NATIVE_TLS="${UV_NATIVE_TLS:-1}"
-  export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-1}"
+  # The switch was renamed --native-tls -> --system-certs; setting both makes
+  # newer uv emit a deprecation warning, so pick by what this uv advertises.
+  if command -v uv >/dev/null 2>&1 && uv help 2>/dev/null | grep -q -- "--system-certs"; then
+    export UV_SYSTEM_CERTS="${UV_SYSTEM_CERTS:-1}"
+  else
+    export UV_NATIVE_TLS="${UV_NATIVE_TLS:-1}"
+  fi
 else
   echo "WARNING: no system CA bundle found; TLS-inspecting proxies will break uv/pip" >&2
 fi
