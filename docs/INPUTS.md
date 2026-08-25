@@ -122,6 +122,35 @@ That is acceptable for the current milestone, which is *the model runs and the
 output is physical* — not a verification score. It must be revisited before any
 result is quoted, and certainly before fine-tuning.
 
+## 4b. The datasets are not published — they have to be built
+
+Checked 2026-08-25: there is no downloadable anemoi-format zarr for either side
+of the cutout.
+
+| Source | Status |
+|---|---|
+| `met-no` datasets on Hugging Face | none exist |
+| ECMWF `ml-datasets` object store | HTTP 403 |
+| data.met.no / thredds.met.no | MEPS is public, but as GRIB/NetCDF |
+
+So task 5 is a **build**, not a download: `anemoi-datasets create` from raw
+sources, on both sides. `scripts/make_era5_recipe.py` generates the global-side
+recipe from the checkpoint metadata so the variable list, levels and date range
+are exactly what the model expects:
+
+    python scripts/make_era5_recipe.py ~/bris-runs/ckpt-metadata.json \
+        --date 2025-04-01T00:00:00 -o bris/configs/era5_n320.yaml
+
+It emits 89 stored fields, 17 surface and 6 x 12 upper-air, over the two states
+`multistep_input: 2` requires. The `input:` stanza still needs checking against
+the installed anemoi-datasets version, and ERA5 needs CDS credentials.
+
+**Worth doing first: ask MET.** The Bris authors (Nordhagen et al.,
+arXiv:2511.23043) built these datasets and may simply share them, or share the
+recipes they used. That would replace days of dataset engineering with an email,
+and it also settles whether ERA5 is an acceptable substitute for `od` in their
+view. Building from scratch is the fallback, not the obvious first move.
+
 ## 5. Sanity checks on the output
 
 Per `routing`, two NetCDF files are written per run — a `nordic_` file on the
