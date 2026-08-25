@@ -35,6 +35,8 @@ MODEL_DIR="${BRIS_MODEL_DIR:-$HOME/bris-models}"
 CKPT="$MODEL_DIR/bris-forecaster/bris-crpsfft_inference.ckpt"
 
 export PATH="$HOME/.local/bin:$PATH"
+# shellcheck source=../../scripts/tls_env.sh
+source "$REPO_DIR/scripts/tls_env.sh"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$ENV_DIR/.uv-cache}"
 
 echo "=== node: $(hostname)  cpus: ${SLURM_CPUS_PER_TASK:-?}"

@@ -51,6 +51,9 @@ MEMBERS="${BRIS_MEMBERS:-1}"
 LEADTIMES="${BRIS_LEADTIMES:-2}"
 DATE="${BRIS_DATE:-2025-04-01T00:00:00}"
 
+# shellcheck source=../../scripts/tls_env.sh
+source "$REPO_DIR/scripts/tls_env.sh"
+
 mkdir -p "$OUTPUT_DIR" logs
 
 if [[ -z "${SLURM_GPUS_PER_NODE:-}" ]]; then

@@ -17,6 +17,10 @@
 
 set -euo pipefail
 
+# eX3 re-signs TLS; huggingface_hub uses certifi and needs the system bundle.
+# shellcheck source=tls_env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tls_env.sh"
+
 REPOS=(
   "met-no/bris-forecaster"              # CRPS-FFT: inference + training ckpt, configs
   "met-no/bris-forecaster-pretrained"   # global pretraining ckpt + stage configs

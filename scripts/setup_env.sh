@@ -45,6 +45,10 @@ while getopts ":d:nh" opt; do
   esac
 done
 
+# eX3 re-signs TLS; uv needs the system trust store or it fails UnknownIssuer.
+# shellcheck source=tls_env.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tls_env.sh"
+
 command -v uv >/dev/null 2>&1 || {
   echo "ERROR: uv not found. Install it first:" >&2
   echo "  curl -LsSf https://astral.sh/uv/install.sh | sh" >&2

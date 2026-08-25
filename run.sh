@@ -40,6 +40,11 @@ export UV_CONCURRENT_INSTALLS=8
 export UV_CONCURRENT_DOWNLOADS=8
 export PATH="$HOME/.local/bin:$PATH"
 
+# eX3 re-signs TLS with a local CA. uv and requests ship their own roots and
+# fail with UnknownIssuer unless pointed at the system trust store.
+# shellcheck source=scripts/tls_env.sh
+source "$REPO_DIR/scripts/tls_env.sh"
+
 DO_GPU=1
 MAIL_TO=""
 while [[ $# -gt 0 ]]; do
@@ -114,6 +119,8 @@ else
   note="see $LOG_DIR/env.log"
   grep -qi "permission denied (publickey)\|could not read from remote" "$LOG_DIR/env.log" 2>/dev/null \
     && note="SSH pin on metno/bris-inference not rewritten to HTTPS — $LOG_DIR/env.log"
+  grep -qi "invalid peer certificate\|UnknownIssuer\|certificate verify failed" "$LOG_DIR/env.log" 2>/dev/null \
+    && note="TLS trust: system CA bundle not picked up (see scripts/tls_env.sh) — $LOG_DIR/env.log"
   record "env" "FAILED" "$note" "$LOG_DIR/env.log"
   echo "  FAILED ($note)"
 fi
@@ -217,6 +224,8 @@ fi
     done
     echo
     echo "proxy env: ${http_proxy:-unset} / ${https_proxy:-unset}"
+    echo "CA bundle : ${BRIS_CA_BUNDLE:-NONE FOUND}"
+    echo "uv TLS    : UV_NATIVE_TLS=${UV_NATIVE_TLS:-unset} UV_SYSTEM_CERTS=${UV_SYSTEM_CERTS:-unset}"
     echo '```'
     echo
   fi

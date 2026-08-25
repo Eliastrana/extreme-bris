@@ -138,6 +138,24 @@ which needs a GitHub SSH key on the compute node. The repo is public, so
 `scripts/setup_env.sh` adds a git `insteadOf` rewrite to HTTPS. That leaves the
 URL string in `uv.lock` untouched, so `--locked` still validates.
 
+### eX3 does TLS interception
+
+Outbound HTTPS is re-signed by a local CA held in the system trust store. `curl`
+and `git` work; anything shipping its own roots does not:
+
+    uv        bundled webpki roots  ->  invalid peer certificate: UnknownIssuer
+    requests  bundled certifi       ->  SSLCertVerificationError
+
+`scripts/tls_env.sh` locates the system bundle and exports `SSL_CERT_FILE`,
+`REQUESTS_CA_BUNDLE`, `CURL_CA_BUNDLE` and `UV_NATIVE_TLS`/`UV_SYSTEM_CERTS`.
+Every script sources it. This trusts what the host already trusts — it does not
+disable verification, and if no bundle is found it changes nothing rather than
+weakening TLS.
+
+If you run anything here by hand that reaches the network:
+
+    source scripts/tls_env.sh
+
 ### Open questions
 
 - Whether the model runs unsharded on one card. Assumed plausible at inference

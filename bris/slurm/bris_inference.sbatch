@@ -61,6 +61,9 @@ BRIS_DATES="${BRIS_DATES:-2025-04-01T00:00:00}"
 
 export BRIS_OUTPUT_DIR="$OUTPUT_DIR"
 
+# shellcheck source=../../scripts/tls_env.sh
+source "$REPO_DIR/scripts/tls_env.sh"
+
 mkdir -p "$OUTPUT_DIR" logs
 
 # --- environment ------------------------------------------------------------
