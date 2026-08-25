@@ -59,11 +59,21 @@ not ship it: `evenmn/anemoi-core`, branch `feat/crps-fft-loss`.
 
 ## Running Bris on eX3
 
+On the login node — light work only, eX3 asks for at most 8 threads there:
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
+    uv tool install huggingface_hub
     ./scripts/download_models.sh -c            # configs first, ~16 KB
     ./scripts/download_models.sh               # checkpoints, 4.7 GB total
-    ./scripts/setup_env.sh                     # build the pinned env (on a GPU node)
-    python scripts/inspect_checkpoint.py ~/bris-models/bris-forecaster/bris-crpsfft_inference.ckpt
-    mkdir -p logs && sbatch bris/slurm/bris_smoke.sbatch
+
+Everything heavier goes through the queue. Prefer `sbatch` over interactive
+`srun`: a forgotten interactive session can hold a GPU, which eX3 asks us not
+to do.
+
+    mkdir -p logs
+    sbatch bris/slurm/setup_and_inspect.sbatch   # env + checkpoint metadata, CPU only
+    sbatch bris/slurm/bris_smoke.sbatch          # 1 GPU — needs input data first
 
 See [docs/INPUTS.md](docs/INPUTS.md) for what the model needs as input and how we
 plan to assemble it without MARS access.

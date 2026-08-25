@@ -7,9 +7,15 @@
 #   ./scripts/setup_env.sh -n              # no --locked (allows resolver drift)
 #
 # Run this on a compute node, not the login node: the CUDA wheels are large and
-# the resolve is CPU-heavy. Grab an interactive shell first, e.g.
+# the resolve is CPU-heavy. Submit it as a batch job rather than sitting in an
+# interactive session — eX3 asks for sbatch over srun, and an interactive shell
+# that is forgotten or disconnected can hold a GPU:
 #
-#   srun -p <gpu-partition> -N 1 -n 8 --gres=gpu:1 --pty /bin/bash --login
+#   mkdir -p logs && sbatch bris/slurm/setup_and_inspect.sbatch
+#
+# No GPU is needed here. Installing wheels is CPU work, so the batch job runs on
+# defq without --gres, and torch.cuda.is_available() being False in the
+# verification output below is expected rather than a problem.
 #
 # WHY THIS SCRIPT EXISTS
 # ----------------------
