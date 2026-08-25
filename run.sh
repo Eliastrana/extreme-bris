@@ -53,8 +53,8 @@ done
 
 mkdir -p "$RUN_DIR" "$LOG_DIR" "$BRIS_DATA_DIR"
 
-STEP_NAMES=(); STEP_STATUS=(); STEP_NOTES=()
-record() { STEP_NAMES+=("$1"); STEP_STATUS+=("$2"); STEP_NOTES+=("$3"); }
+STEP_NAMES=(); STEP_STATUS=(); STEP_NOTES=(); STEP_LOGS=()
+record() { STEP_NAMES+=("$1"); STEP_STATUS+=("$2"); STEP_NOTES+=("$3"); STEP_LOGS+=("${4:-}"); }
 
 banner() { printf '\n\033[1m=== %s\033[0m\n' "$1"; }
 
@@ -84,7 +84,7 @@ elif command -v uv >/dev/null 2>&1 && uv tool install huggingface_hub >>"$LOG_DI
   record "hf-cli" "ok" "installed via uv tool"
   echo "  installed"
 else
-  record "hf-cli" "FAILED" "see $LOG_DIR/hf.log"
+  record "hf-cli" "FAILED" "see hf.log" "$LOG_DIR/hf.log"
   echo "  FAILED (see $LOG_DIR/hf.log)"
 fi
 
@@ -98,7 +98,7 @@ elif "$REPO_DIR/scripts/download_models.sh" >>"$LOG_DIR/download.log" 2>&1; then
   record "download" "ok" "$(du -sh "$BRIS_MODEL_DIR" 2>/dev/null | cut -f1) in $BRIS_MODEL_DIR"
   echo "  done: $(du -sh "$BRIS_MODEL_DIR" 2>/dev/null | cut -f1)"
 else
-  record "download" "FAILED" "see $LOG_DIR/download.log"
+  record "download" "FAILED" "see download.log" "$LOG_DIR/download.log"
   echo "  FAILED (see $LOG_DIR/download.log)"
 fi
 
@@ -114,7 +114,7 @@ else
   note="see $LOG_DIR/env.log"
   grep -qi "permission denied (publickey)\|could not read from remote" "$LOG_DIR/env.log" 2>/dev/null \
     && note="SSH pin on metno/bris-inference not rewritten to HTTPS — $LOG_DIR/env.log"
-  record "env" "FAILED" "$note"
+  record "env" "FAILED" "$note" "$LOG_DIR/env.log"
   echo "  FAILED ($note)"
 fi
 
@@ -130,7 +130,7 @@ elif (cd "$BRIS_ENV_DIR" && uv run python "$REPO_DIR/scripts/inspect_checkpoint.
   record "metadata" "ok" "$nvars variables dumped to $META"
   echo "  done: $nvars variables -> $META"
 else
-  record "metadata" "FAILED" "see $LOG_DIR/metadata.log"
+  record "metadata" "FAILED" "see metadata.log" "$LOG_DIR/metadata.log"
   echo "  FAILED (see $LOG_DIR/metadata.log)"
 fi
 
@@ -158,7 +158,7 @@ else
     record "smoke" "ok" "$nc_count NetCDF file(s) written"
     echo "  done: $nc_count NetCDF file(s)"
   else
-    record "smoke" "FAILED" "see $LOG_DIR/smoke-*.err"
+    record "smoke" "FAILED" "see smoke-*.err" "$(ls -t "$LOG_DIR"/smoke-*.err 2>/dev/null | head -1)"
     echo "  FAILED (see $LOG_DIR/smoke-*.err)"
   fi
 fi
@@ -177,6 +177,45 @@ fi
     echo "| ${STEP_NAMES[$i]} | ${STEP_STATUS[$i]} | ${STEP_NOTES[$i]} |"
   done
   echo
+  # Anything that failed gets its log excerpted inline, so the report is
+  # self-contained and can be pasted somewhere useful without chasing files.
+  any_failed=0
+  for i in "${!STEP_NAMES[@]}"; do
+    [[ "${STEP_STATUS[$i]}" == "FAILED" ]] || continue
+    any_failed=1
+    echo "## Failure: ${STEP_NAMES[$i]}"
+    echo
+    lg="${STEP_LOGS[$i]}"
+    if [[ -n "$lg" && -f "$lg" ]]; then
+      echo '```'
+      tail -25 "$lg"
+      echo '```'
+    else
+      echo "(no log captured)"
+    fi
+    echo
+  done
+
+  if [[ "$any_failed" -eq 1 ]]; then
+    echo "## Diagnostics"
+    echo
+    echo '```'
+    echo "disk:"
+    df -h "$HOME" 2>/dev/null | tail -2
+    quota -s 2>/dev/null | tail -3 || echo "  (quota unavailable)"
+    echo
+    echo "reachability:"
+    for u in https://pypi.org/simple/ https://files.pythonhosted.org/ \
+             https://huggingface.co https://astral.sh; do
+      printf "  %-34s " "$u"
+      curl -sS -m 10 -o /dev/null -w "HTTP %{http_code}\n" "$u" 2>&1 | tail -1
+    done
+    echo
+    echo "proxy env: ${http_proxy:-unset} / ${https_proxy:-unset}"
+    echo '```'
+    echo
+  fi
+
   if [[ -f "$META" ]]; then
     echo "## Checkpoint metadata"
     echo
