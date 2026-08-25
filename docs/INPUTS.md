@@ -189,7 +189,37 @@ is safe because it is a standard grid; MEPS is MET's own domain and is not.
 
 The 949 x 1069 figure is back-derived from `CRPSFFTLoss` (xdim 849, ydim 969,
 which are post-`trim_edge: 50`), so it is inferred rather than stated anywhere.
-Confirm it before building.
+
+### Four ways to get the grid definition, in order of cost
+
+Asking MET is the obvious route but not the only one, and not the first.
+
+**1. Read it out of the checkpoint.** The same fact that makes the grid a hard
+constraint also solves it: `switch_graph: null` means the graph is stored in the
+checkpoint, and an Anemoi graph carries explicit lat/lon coordinates for every
+node. The grid is therefore already in hand.
+
+    cd $BRIS_ENV_DIR && uv run python scripts/dump_grid.py \
+        $BRIS_MODEL_DIR/bris-forecaster/bris-crpsfft_inference.ckpt \
+        --npz ~/bris-runs/grid.npz
+
+This gives the authoritative node coordinates — better than any description,
+because it is what the model will actually be indexed against. It also confirms
+or refutes the inferred 949 x 1069 directly.
+
+**2. Dataset provenance in the checkpoint metadata.** anemoi-datasets records
+the source specification of the dataset a model was trained on. Worth grepping
+`ckpt-metadata.json` for the recipe before building anything:
+
+    python -c "import json;d=json.load(open('ckpt-metadata.json'));print(json.dumps(d.get('dataset'),indent=2)[:4000])"
+
+**3. The public MEPS archive.** MEPS is a standard MET product on
+thredds.met.no, and the NetCDF headers carry the full projection, spacing and
+extent. That pins the grid geometry even without the anemoi dataset.
+
+**4. Ask MET.** Still worth doing, but for the question routes 1-3 cannot
+answer: whether substituting ERA5 for the operational analysis is acceptable,
+and whether they will share the datasets outright. Not for the grid.
 
 ### Unverified: where normalisation statistics come from
 
