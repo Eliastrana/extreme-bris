@@ -24,20 +24,54 @@ import sys
 from pathlib import Path
 
 
-def find_graph(obj, _depth=0):
-    """Locate the graph object inside a loaded checkpoint."""
+GRAPH_ATTRS = ("graph_data", "graph", "_graph_data", "_graph")
+
+
+def find_graph(obj, _depth=0, _seen=None):
+    """Locate the graph inside a loaded checkpoint.
+
+    Bris inference checkpoints do not unpickle to a dict — torch.load returns an
+    AnemoiModelInterface instance — so attributes have to be searched as well as
+    mapping keys. Named attributes are tried first; the general scan skips
+    nn.Module children, which are large and never hold the graph.
+    """
     if _depth > 6:
         return None
+    if _seen is None:
+        _seen = set()
+    if id(obj) in _seen:
+        return None
+    _seen.add(id(obj))
+
     if hasattr(obj, "node_types"):          # torch_geometric HeteroData
         return obj
+
+    for attr in GRAPH_ATTRS:
+        val = getattr(obj, attr, None) if not isinstance(obj, dict) else obj.get(attr)
+        if val is not None:
+            hit = find_graph(val, _depth + 1, _seen)
+            if hit is not None:
+                return hit
+
     if isinstance(obj, dict):
-        for key in ("graph_data", "graph", "_graph_data"):
-            if key in obj:
-                hit = find_graph(obj[key], _depth + 1)
-                if hit is not None:
-                    return hit
         for v in obj.values():
-            hit = find_graph(v, _depth + 1)
+            hit = find_graph(v, _depth + 1, _seen)
+            if hit is not None:
+                return hit
+        return None
+
+    state = getattr(obj, "__dict__", None)
+    if isinstance(state, dict):
+        try:
+            import torch.nn as nn
+        except Exception:
+            nn = None
+        for k, v in state.items():
+            if k.startswith("_parameters") or k.startswith("_buffers"):
+                continue
+            if nn is not None and isinstance(v, nn.Module):
+                continue
+            hit = find_graph(v, _depth + 1, _seen)
             if hit is not None:
                 return hit
     return None
@@ -105,8 +139,16 @@ def main() -> int:
 
     graph = find_graph(ckpt)
     if graph is None:
-        print("No graph found in the checkpoint.", file=sys.stderr)
-        print("Keys present:", list(ckpt.keys())[:20] if isinstance(ckpt, dict) else type(ckpt),
+        print("No graph found in the checkpoint.\n", file=sys.stderr)
+        print(f"Loaded object: {type(ckpt)}", file=sys.stderr)
+        if isinstance(ckpt, dict):
+            print("Keys:", list(ckpt.keys())[:30], file=sys.stderr)
+        else:
+            attrs = sorted(k for k in vars(ckpt)) if hasattr(ckpt, "__dict__") else []
+            print("Attributes:", attrs[:40], file=sys.stderr)
+            pub = [a for a in dir(ckpt) if not a.startswith("_")]
+            print("Public names:", pub[:40], file=sys.stderr)
+        print("\nPaste this output — it names where the graph actually lives.",
               file=sys.stderr)
         return 2
 
