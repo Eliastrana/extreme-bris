@@ -152,9 +152,19 @@ Every script sources it. This trusts what the host already trusts — it does no
 disable verification, and if no bundle is found it changes nothing rather than
 weakening TLS.
 
-If you run anything here by hand that reaches the network:
+Before running anything here by hand, source the shared paths — this sets
+`BRIS_ENV_DIR` and friends, and the TLS trust settings:
 
-    source scripts/tls_env.sh
+    source ~/extreme-bris/scripts/env.sh
+
+Without it, documented commands like `cd $BRIS_ENV_DIR` silently become `cd`
+and run against the wrong environment.
+
+Reading the grid definition out of the checkpoint (small, CPU-only — belongs on
+the login node, not the queue):
+
+    cd $BRIS_ENV_DIR && uv run python $BRIS_REPO_DIR/scripts/dump_grid.py \
+        $BRIS_CKPT --npz $BRIS_RUN_DIR/grid.npz
 
 ### Open questions
 

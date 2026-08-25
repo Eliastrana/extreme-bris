@@ -27,10 +27,10 @@ set -uo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export BRIS_REPO_DIR="$REPO_DIR"
-export BRIS_MODEL_DIR="${BRIS_MODEL_DIR:-$HOME/bris-models}"
-export BRIS_DATA_DIR="${BRIS_DATA_DIR:-$HOME/bris-data}"
-export BRIS_ENV_DIR="${BRIS_ENV_DIR:-$HOME/bris-env}"
-RUN_DIR="${BRIS_RUN_DIR:-$HOME/bris-runs}"
+# Single source of truth for paths, shared with interactive use.
+# shellcheck source=scripts/env.sh
+source "$REPO_DIR/scripts/env.sh"
+RUN_DIR="$BRIS_RUN_DIR"
 REPORT="$RUN_DIR/REPORT.md"
 LOG_DIR="$RUN_DIR/logs"
 
@@ -39,11 +39,6 @@ export OMP_NUM_THREADS=8
 export UV_CONCURRENT_INSTALLS=8
 export UV_CONCURRENT_DOWNLOADS=8
 export PATH="$HOME/.local/bin:$PATH"
-
-# eX3 re-signs TLS with a local CA. uv and requests ship their own roots and
-# fail with UnknownIssuer unless pointed at the system trust store.
-# shellcheck source=scripts/tls_env.sh
-source "$REPO_DIR/scripts/tls_env.sh"
 
 DO_GPU=1
 MAIL_TO=""

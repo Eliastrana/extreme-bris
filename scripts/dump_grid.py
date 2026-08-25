@@ -82,8 +82,19 @@ def main() -> int:
     ap.add_argument("--npz", type=Path, help="save raw coordinates per node set")
     args = ap.parse_args()
 
-    import numpy as np
-    import torch
+    try:
+        import numpy as np
+        import torch
+    except ModuleNotFoundError as exc:
+        print(f"ERROR: {exc.name} not available — this is not the Bris environment.",
+              file=sys.stderr)
+        print("Run it from the built env, with an explicit path:", file=sys.stderr)
+        print("  cd ~/bris-env && uv run python <repo>/scripts/dump_grid.py <ckpt>",
+              file=sys.stderr)
+        print("If you used $BRIS_ENV_DIR and landed in $HOME, the variable was unset:",
+              file=sys.stderr)
+        print("  source ~/extreme-bris/scripts/env.sh", file=sys.stderr)
+        return 3
 
     if not args.checkpoint.exists():
         print(f"ERROR: no such file: {args.checkpoint}", file=sys.stderr)
