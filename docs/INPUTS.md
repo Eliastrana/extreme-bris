@@ -187,8 +187,32 @@ stretched grid. The MEPS dataset must therefore match MET's domain, projection
 and 949 x 1069 extent exactly, or the graph will not align with the data. N320
 is safe because it is a standard grid; MEPS is MET's own domain and is not.
 
-The 949 x 1069 figure is back-derived from `CRPSFFTLoss` (xdim 849, ydim 969,
-which are post-`trim_edge: 50`), so it is inferred rather than stated anywhere.
+### Grid, resolved from the checkpoint (2026-08-25)
+
+Read out of the checkpoint graph with `scripts/dump_grid.py` and split with
+`scripts/analyse_grid.py`. No longer inferred:
+
+| | |
+|---|---|
+| data nodes | 1,359,281 |
+| LAM (MEPS) | **822,681 = 849 x 969** |
+| global (N320) | 536,600 |
+| N320 latitude rows | **640** — confirms N320 |
+| removed under the LAM | 5,480 |
+
+**MEPS domain, post-`trim_edge: 50`:**
+
+    latitude    51.119 N .. 74.131 N
+    longitude   13.150 W .. 49.418 E
+
+The pre-trim extent is therefore 949 x 1069, matching what `CRPSFFTLoss`
+implied. The 5,480 global points dropped under the LAM agree with the ~5,350
+expected from the footprint area against a 31 km cell, the small excess being
+what a curved Lambert-conformal domain cuts out of a Gaussian grid.
+
+Coordinates are saved in `grid.npz` and are the thing to validate a built
+dataset against — node order included, since that is what the model is indexed
+on.
 
 ### Four ways to get the grid definition, in order of cost
 
