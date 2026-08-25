@@ -41,6 +41,11 @@ REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
 OUTPUT_DIR="${BRIS_OUTPUT_DIR:-$HOME/bris-runs/smoke}"
 CONFIG="${BRIS_CONFIG:-$REPO_DIR/bris/configs/config_inference_ex3.yaml}"
 
+# The config resolves these with oc.env, so they must be exported, not just set.
+export BRIS_MODEL_DIR="${BRIS_MODEL_DIR:-$HOME/bris-models}"
+export BRIS_DATA_DIR="${BRIS_DATA_DIR:-$HOME/bris-data}"
+export BRIS_OUTPUT_DIR="$OUTPUT_DIR"
+
 GPUS_PER_MODEL="${BRIS_GPUS_PER_MODEL:-1}"
 MEMBERS="${BRIS_MEMBERS:-1}"
 LEADTIMES="${BRIS_LEADTIMES:-2}"
@@ -72,8 +77,44 @@ echo "=== leadtimes: $LEADTIMES  (${DATE})"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
 echo
 
-[[ -d "$ENV_DIR" ]] || { echo "ERROR: env not found: $ENV_DIR (run scripts/setup_env.sh)" >&2; exit 1; }
+[[ -d "$ENV_DIR" ]] || { echo "ERROR: env not found: $ENV_DIR (sbatch setup_and_inspect.sbatch)" >&2; exit 1; }
 [[ -f "$CONFIG" ]]  || { echo "ERROR: config not found: $CONFIG" >&2; exit 1; }
+
+# --- preflight --------------------------------------------------------------
+# Fail here, loudly, rather than 40 lines into an anemoi-datasets traceback.
+
+CKPT="$BRIS_MODEL_DIR/bris-forecaster/bris-crpsfft_inference.ckpt"
+[[ -f "$CKPT" ]] || {
+  echo "ERROR: checkpoint missing: $CKPT" >&2
+  echo "       ./scripts/download_models.sh   (4.7 GB, run on the login node)" >&2
+  exit 1
+}
+
+missing=0
+for ds in meps-2p5km-202501-202604-6h-v7.zarr era5-n320-2025-6h-v1.zarr; do
+  if [[ ! -e "$BRIS_DATA_DIR/$ds" ]]; then
+    echo "MISSING INPUT: $BRIS_DATA_DIR/$ds" >&2
+    missing=1
+  fi
+done
+if [[ "$missing" -eq 1 ]]; then
+  cat >&2 <<'NODATA'
+
+No input data — the forecast cannot run yet.
+
+This is the open work, not a misconfiguration. Bris needs initial conditions on
+a cutout of MEPS 2.5 km inside and N320 outside. The N320 atmospheric component
+MET used is MARS class od, which we do not have access to; the plan is to
+substitute public ERA5 N320. See docs/INPUTS.md.
+
+Everything upstream of this point (environment, checkpoint, Slurm wiring) can
+still be verified with:
+
+    sbatch bris/slurm/setup_and_inspect.sbatch
+
+NODATA
+  exit 2
+fi
 
 cd "$ENV_DIR"
 

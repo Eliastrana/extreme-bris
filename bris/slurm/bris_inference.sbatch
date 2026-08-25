@@ -48,13 +48,18 @@
 set -euo pipefail
 
 ENV_DIR="${BRIS_ENV_DIR:-$HOME/bris-env}"
-MODEL_DIR="${BRIS_MODEL_DIR:-$HOME/bris-models}"
+# Resolved by oc.env inside the config, so these must be exported.
+export BRIS_MODEL_DIR="${BRIS_MODEL_DIR:-$HOME/bris-models}"
+export BRIS_DATA_DIR="${BRIS_DATA_DIR:-$HOME/bris-data}"
+MODEL_DIR="$BRIS_MODEL_DIR"
 REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
 OUTPUT_DIR="${BRIS_OUTPUT_DIR:-$HOME/bris-runs/outputs}"
 CONFIG="${BRIS_CONFIG:-$REPO_DIR/bris/configs/config_inference_ex3.yaml}"
 
 # Dates to forecast, whitespace-separated. One is enough for the first milestone.
 BRIS_DATES="${BRIS_DATES:-2025-04-01T00:00:00}"
+
+export BRIS_OUTPUT_DIR="$OUTPUT_DIR"
 
 mkdir -p "$OUTPUT_DIR" logs
 
