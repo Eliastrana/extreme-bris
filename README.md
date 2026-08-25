@@ -63,7 +63,7 @@ not ship it: `evenmn/anemoi-core`, branch `feat/crps-fft-loss`.
     ./scripts/download_models.sh               # checkpoints, 4.7 GB total
     ./scripts/setup_env.sh                     # build the pinned env (on a GPU node)
     python scripts/inspect_checkpoint.py ~/bris-models/bris-forecaster/bris-crpsfft_inference.ckpt
-    mkdir -p logs && sbatch bris/slurm/bris_inference.sbatch
+    mkdir -p logs && sbatch bris/slurm/bris_smoke.sbatch
 
 See [docs/INPUTS.md](docs/INPUTS.md) for what the model needs as input and how we
 plan to assemble it without MARS access.
@@ -84,11 +84,29 @@ at a path on Leonardo. There is no lighter global model to smoke-test against �
 the CRPS-FFT checkpoint is the only published weight set, so it is also the
 first thing that has to work.
 
-**Inference wants 8 GPUs, not 1.** `num_gpus_per_model: 4` with
-`num_members: 2` — the model is sharded across four cards and two ensemble
-members run alongside, which is exactly one 4124GO-NART node. Whether it fits on
-fewer cards on 80 GB A100s is worth testing, but it is not a single-GPU job by
-default.
+**Inference asks for 8 GPUs by default.** `num_gpus_per_model: 4` with
+`num_members: 2` — sharded across four cards, two ensemble members alongside,
+which is exactly the `hgx2q` node. But those are the numbers MET ran on
+Leonardo's 64 GB A100s, not a hard requirement of the checkpoint. For a
+does-it-run check, override them downward and stay off the flagship node.
+
+### GPU ladder
+
+Start at the bottom. Only move up when something actually fails.
+
+| Step | Partition | Allocation | Why |
+|---|---|---|---|
+| 1 | `a40q` | 1x A40 48 GB | idle, uncontended; `bris_smoke.sbatch` default |
+| 2 | `a100q` | 2x A100 40 GB | if 48 GB is not enough |
+| 3 | `dgx2q` | 4x V100 | first step where the published `num_gpus_per_model: 4` fits |
+| 4 | `hgx2q` | 8x A100 80 GB | the published config unmodified; the real runs |
+
+`a100q`/`milanq` have only 2 GPUs per node, so they cannot run
+`num_gpus_per_model: 4` — they are for the env build, checkpoint inspection and
+reduced-shard tests. `gh200q` is ARM and is excluded: the `uv.lock` is x86/CUDA.
+
+    sbatch bris/slurm/bris_smoke.sbatch      # 1 GPU, 1 member, 12h forecast
+    sbatch bris/slurm/bris_inference.sbatch  # published config on hgx2q
 
 **`uv sync --locked` will fail without a workaround.** The lockfile pins the
 inference package over SSH:
@@ -101,10 +119,11 @@ URL string in `uv.lock` untouched, so `--locked` still validates.
 
 ### Open questions
 
-- Slurm partition name for the 8x A100 80 GB node — `sinfo` on eX3.
+- Whether the model runs unsharded on one card. Assumed plausible at inference
+  (no optimizer state, no retained activations, single member), not established.
 - `multistep_input` is unset in both configs, so it defaults to 2 (t-6h and t0).
   Confirm from the checkpoint before building initial conditions.
-- Node walltime limits, which is why the Slurm script resumes by date marker.
+- Whether ERA5-initialised output is physical enough to be worth scoring.
 
 ## References
 

@@ -2,13 +2,21 @@
 #SBATCH --job-name=bris-inference
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
+#SBATCH --partition=hgx2q
 #SBATCH --cpus-per-task=32
-#SBATCH --gpus-per-node=8
-#SBATCH --time=02:00:00
+#SBATCH --gres=gpu:a100:8
+#SBATCH --time=04:00:00
 #SBATCH --output=logs/bris-%j.out
 #SBATCH --error=logs/bris-%j.err
-# TODO: set the partition once `sinfo` confirms the name of the 8x A100 80GB
-# (Supermicro 4124GO-NART) queue on eX3. Add e.g.  #SBATCH --partition=a100q
+#
+# hgx2q is the single 8x A100 80GB node (Supermicro 4124GO-NART), 256 CPUs,
+# 14-day limit. The 2x A100 nodes on a100q/milanq CANNOT run this config as
+# published: num_gpus_per_model is 4, so two cards are not enough. Use them for
+# the environment build and checkpoint inspection only.
+#
+# hgx2q is a single shared node — check what is free before asking for all 8:
+#   sinfo -p hgx2q -o "%n %G %C %t"
+#   squeue -p hgx2q
 #
 # Submit:
 #   mkdir -p logs && sbatch bris/slurm/bris_inference.sbatch
@@ -26,15 +34,16 @@
 #
 # Whether it can be squeezed onto fewer cards on 80 GB A100s (MET trained on
 # 64 GB) is an open question. Test it deliberately rather than assuming:
-#   sbatch --gpus-per-node=4 --export=ALL,BRIS_GPUS_PER_MODEL=4,BRIS_MEMBERS=1 ...
+#   sbatch --gres=gpu:a100:4 --export=ALL,BRIS_MEMBERS=1 ...
 # and watch for OOM in the error log.
 #
 # ---------------------------------------------------------------------------
 # RESUME
 # ---------------------------------------------------------------------------
-# Node walltime limits on eX3 are not yet known. This script runs one date per
-# invocation and skips any date whose output already exists, so re-submitting
-# after a timeout picks up where it left off rather than redoing finished work.
+# hgx2q allows 14 days, so walltime is not the pressure it was assumed to be —
+# a 60h forecast will not come close. Resume is kept anyway because the node is
+# shared and a job can still die for other reasons: one date per invocation,
+# skipping any date already marked complete.
 
 set -euo pipefail
 
@@ -54,7 +63,18 @@ mkdir -p "$OUTPUT_DIR" logs
 # bris-inference reads its parallelism from Slurm's environment. Under sbatch
 # these are set for us; export them explicitly so the config's oc.env lookups
 # resolve identically in an interactive srun too.
-export SLURM_GPUS_PER_NODE="${SLURM_GPUS_PER_NODE:-${BRIS_GPUS_PER_NODE:-8}}"
+# Prefer what Slurm actually granted; --gres does not always set
+# SLURM_GPUS_PER_NODE, so fall back to counting visible devices rather than
+# assuming 8 and mismatching the allocation.
+if [[ -z "${SLURM_GPUS_PER_NODE:-}" ]]; then
+  if [[ -n "${SLURM_GPUS_ON_NODE:-}" ]]; then
+    export SLURM_GPUS_PER_NODE="$SLURM_GPUS_ON_NODE"
+  elif command -v nvidia-smi >/dev/null 2>&1; then
+    export SLURM_GPUS_PER_NODE="$(nvidia-smi -L | wc -l | tr -d ' ')"
+  else
+    export SLURM_GPUS_PER_NODE=8
+  fi
+fi
 export SLURM_NNODES="${SLURM_NNODES:-1}"
 
 # Keep everything offline. The training config points MLflow at mlflow.ecmwf.int;

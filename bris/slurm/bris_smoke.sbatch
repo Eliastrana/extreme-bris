@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=bris-smoke
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --partition=a40q
+#SBATCH --cpus-per-task=16
+#SBATCH --gres=gpu:1
+#SBATCH --time=01:00:00
+#SBATCH --output=logs/smoke-%j.out
+#SBATCH --error=logs/smoke-%j.err
+#
+# Smoke test: does Bris load and step at all? Smallest allocation that could
+# possibly work, on an idle non-flagship node. Not for real forecasts.
+#
+#   mkdir -p logs && sbatch bris/slurm/bris_smoke.sbatch
+#
+# ---------------------------------------------------------------------------
+# WHAT THIS CHANGES vs THE PUBLISHED CONFIG
+# ---------------------------------------------------------------------------
+#   num_gpus_per_model : 4 -> 1     no model sharding
+#   num_members        : 2 -> 1     single member, no ensemble
+#   leadtimes          : 10 -> 2    12h instead of 60h
+#
+# MET published 4 GPUs per model because that is how they ran it on Leonardo's
+# 64 GB A100s, not necessarily because 1024 channels cannot fit on one card at
+# inference. Inference has no optimizer state, no activations retained for
+# backward, and no ensemble here — so it is plausible this fits on a single
+# 48 GB A40. Plausible, not established. That is the point of the job.
+#
+# If it OOMs, walk up the ladder (see README):
+#   a40q 1x A40 48GB  ->  a100q 2x A100 40GB  ->  dgx2q 4x V100  ->  hgx2q 8x A100 80GB
+#
+# Escalate by overriding on submit, e.g. four V100s on the DGX-2:
+#   sbatch --partition=dgx2q --gres=gpu:tesla:4 \
+#          --export=ALL,BRIS_GPUS_PER_MODEL=4 bris/slurm/bris_smoke.sbatch
+
+set -euo pipefail
+
+ENV_DIR="${BRIS_ENV_DIR:-$HOME/bris-env}"
+REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
+OUTPUT_DIR="${BRIS_OUTPUT_DIR:-$HOME/bris-runs/smoke}"
+CONFIG="${BRIS_CONFIG:-$REPO_DIR/bris/configs/config_inference_ex3.yaml}"
+
+GPUS_PER_MODEL="${BRIS_GPUS_PER_MODEL:-1}"
+MEMBERS="${BRIS_MEMBERS:-1}"
+LEADTIMES="${BRIS_LEADTIMES:-2}"
+DATE="${BRIS_DATE:-2025-04-01T00:00:00}"
+
+mkdir -p "$OUTPUT_DIR" logs
+
+if [[ -z "${SLURM_GPUS_PER_NODE:-}" ]]; then
+  if [[ -n "${SLURM_GPUS_ON_NODE:-}" ]]; then
+    export SLURM_GPUS_PER_NODE="$SLURM_GPUS_ON_NODE"
+  elif command -v nvidia-smi >/dev/null 2>&1; then
+    export SLURM_GPUS_PER_NODE="$(nvidia-smi -L | wc -l | tr -d ' ')"
+  else
+    export SLURM_GPUS_PER_NODE=1
+  fi
+fi
+export SLURM_NNODES="${SLURM_NNODES:-1}"
+
+export MLFLOW_TRACKING_URI="file://$OUTPUT_DIR/mlruns"
+export HF_HUB_OFFLINE=1
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
+export HYDRA_FULL_ERROR=1
+# Makes OOM report the real allocation site rather than a cascade of retries.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+echo "=== node    : $(hostname)"
+echo "=== gpus    : $SLURM_GPUS_PER_NODE  (per-model: $GPUS_PER_MODEL, members: $MEMBERS)"
+echo "=== leadtimes: $LEADTIMES  (${DATE})"
+nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader || true
+echo
+
+[[ -d "$ENV_DIR" ]] || { echo "ERROR: env not found: $ENV_DIR (run scripts/setup_env.sh)" >&2; exit 1; }
+[[ -f "$CONFIG" ]]  || { echo "ERROR: config not found: $CONFIG" >&2; exit 1; }
+
+cd "$ENV_DIR"
+
+start=$SECONDS
+uv run bris \
+  --config-path="$(dirname "$CONFIG")" \
+  --config-name="$(basename "${CONFIG%.yaml}")" \
+  start_date="$DATE" \
+  end_date="$DATE" \
+  output_path="$OUTPUT_DIR" \
+  hardware.num_gpus_per_model="$GPUS_PER_MODEL" \
+  hardware.num_members="$MEMBERS" \
+  checkpoints.forecaster.leadtimes="$LEADTIMES"
+
+echo
+echo "=== finished in $((SECONDS - start))s"
+ls -lh "$OUTPUT_DIR"/*.nc 2>/dev/null || echo "  (no NetCDF written — check the error log)"
