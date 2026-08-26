@@ -311,13 +311,22 @@ extent. That pins the grid geometry even without the anemoi dataset.
 answer: whether substituting ERA5 for the operational analysis is acceptable.
 Not for the grid.
 
-### Unverified: where normalisation statistics come from
+### Resolved: statistics come from the checkpoint
 
-The checkpoint carries statistics, and Anemoi normally uses those at inference.
-But if any code path recomputes them from the input dataset instead, statistics
-derived from two timesteps would be meaningless — and the failure mode is a run
-that completes and writes physically wrong fields rather than one that errors.
-Check this before trusting a first forecast.
+Traced through bris-inference on 2026-08-26. Normalisation runs entirely through
+`self.model.pre_processors`, and `BrisPredictor.__init__` sets
+`self.model = checkpoint.model` — so the processors, and the training statistics
+inside them, come from the checkpoint. Outside the `legacy/` module there is not
+a single reference to `statistics` in the package.
+
+**Two-state statistics are therefore harmless.** anemoi-datasets computes and
+stores them in the zarr, but nothing at inference reads them. This was the one
+identified failure mode that would have completed successfully while writing
+physically wrong fields; it does not apply.
+
+It does still apply to training. Fine-tuning uses anemoi-training, which is a
+different code path and does read dataset statistics — so a fine-tuning corpus
+must be large enough for them to mean something.
 
 ## 5. Sanity checks on the output
 
