@@ -152,10 +152,14 @@ Every script sources it. This trusts what the host already trusts — it does no
 disable verification, and if no bundle is found it changes nothing rather than
 weakening TLS.
 
-Before running anything here by hand, source the shared paths — this sets
-`BRIS_ENV_DIR` and friends, and the TLS trust settings:
+**Source this before any manual command that touches the network or uv.** It
+sets `BRIS_ENV_DIR` and friends, and the TLS trust settings eX3 requires:
 
     source ~/extreme-bris/scripts/env.sh
+
+Skipping it produces one of two confusing failures: `uv` dies with
+`invalid peer certificate: UnknownIssuer`, or `cd $BRIS_ENV_DIR` silently
+becomes `cd` and runs against the wrong environment.
 
 Without it, documented commands like `cd $BRIS_ENV_DIR` silently become `cd`
 and run against the wrong environment.

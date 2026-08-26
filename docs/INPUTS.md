@@ -173,8 +173,13 @@ needing direct MARS access. The recipe generator emits this.
 lockfile, so the environment `setup_env.sh` builds cannot reach CDS at all.
 Rather than perturb an environment that is verified for inference:
 
+    source ~/extreme-bris/scripts/env.sh    # REQUIRED: eX3 re-signs TLS
     uv venv ~/bris-data-env
     uv pip install --python ~/bris-data-env "anemoi-datasets[all]" cdsapi
+
+Without the first line `uv` fails with `invalid peer certificate: UnknownIssuer`,
+because it uses its own bundled roots rather than the system trust store. Every
+command here that reaches the network needs it.
 
 Then put the CDS key in `~/.cdsapirc` and build with that environment.
 
