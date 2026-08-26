@@ -211,6 +211,33 @@ command here that reaches the network needs it.
 
 Then put the CDS key in `~/.cdsapirc` and build with that environment.
 
+## 4a. Global side: BUILT (2026-08-26)
+
+`~/bris-data/era5-n320-2025-6h-v1.zarr` — the N320 half of the cutout is done.
+
+    Shape        2 x 89 x 1 x 542,080      Resolution   N320
+    Dates        2025-03-31 18:00 .. 2025-04-01 00:00, 6h
+    Missing      0                          Size         204 MiB on disk
+
+89 variables, matching the checkpoint exactly. Physically sane on inspection:
+
+| check | value | reading |
+|---|---|---|
+| surface `z` | -1861 .. 57860 m2/s2 | -190 m to 5900 m — Dead Sea to Himalaya |
+| `2d` vs `2t` | 281.9 < 287.3 K | dewpoint below temperature |
+| `tp` min | exactly 0 | no negative precipitation |
+| `ssrd` mean | 4.09 MJ/m2 / 6h | 189 W/m2 — plausible global mean |
+| `msl` | 948 .. 1037 hPa | plausible |
+| cloud, `lsm` | 0 .. 1 | bounded |
+
+Note `Field shape: [542080]` is one-dimensional, which is correct here: a
+reduced Gaussian grid is inherently unstructured. The 2D `field_shape`
+requirement applies only to the MEPS side, because `trim_edge` needs it.
+
+The `patch` step failed (see below) so provenance metadata is unnormalised.
+Nothing at inference reads it, and the dataset reports `Dataset ready` and
+`Statistics ready`.
+
 ## 4b. The datasets are not published — they have to be built
 
 Checked 2026-08-25: there is no downloadable anemoi-format zarr for either side
