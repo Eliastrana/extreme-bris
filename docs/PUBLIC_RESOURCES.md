@@ -54,8 +54,26 @@ Verified: the site exists, `/datasets` redirects to a login (302) and the API
 returns 401. So there **is** a catalogue of ready-made anemoi datasets — it is
 gated behind ECMWF credentials rather than unpublished.
 
-Norway is an ECMWF member state, and this work is UiO/Simula in collaboration
-with MET, so credentials are plausibly obtainable.
+**Tested 2026-08-26: an ECMWF login succeeds, then the catalogue returns 403.**
+Authentication works; authorisation does not. The account is valid but lacks the
+role or group membership the registry requires. That is not something to solve
+from the outside — the landing page documents no access process, and
+anemoi-registry's own documentation covers the tool rather than who may use it.
+
+It does make the question precise, which is worth more than a vague one:
+
+> I have an ECMWF account but get 403 on anemoi.ecmwf.int/datasets. Which group
+> or role is needed, and can it be granted?
+
+Thomas Nipen (thomasn@met.no) wrote the tutorial that points at the catalogue
+and invites contact about it, so that is an invited route rather than a cold
+ask.
+
+Worth keeping in mind: access may still not yield the MEPS stretched-grid
+dataset. The tutorial says the catalogue gives S3 links **and paths on LUMI and
+Leonardo** — MET trains on LUMI, so their regional datasets may exist only as a
+path on a machine we have no account on. Ask whether the dataset is downloadable,
+not merely whether it is listed.
 
 ## What this changes about the ask
 
