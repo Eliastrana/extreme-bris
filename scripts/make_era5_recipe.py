@@ -113,7 +113,14 @@ def main() -> int:
 #     tutorial (metno/anemoi-regional-tutorial), which uses `level:` rather than
 #     MARS' `levelist:`. Still worth checking against the installed
 #     anemoi-datasets version
-#   * ERA5 retrieval needs credentials in ~/.cdsapirc
+#   * ERA5 retrieval needs credentials in ~/.cdsapirc, and the licence must be
+#     accepted once through the CDS web form before the API will serve anything
+#   * this is a MARS-style request (class: ea, grid: N320), which means
+#     `reanalysis-era5-complete` rather than the standard CDS ERA5 datasets.
+#     The standard ones return a regular 0.25 deg lat/lon grid, which does NOT
+#     match the checkpoint's graph — the global side must be native N320.
+#     era5-complete is API-only and served from tape, so expect hours to days
+#     even for two states. Submit early.
 #   * this substitutes ERA5 (class ea) for the operational analysis (class od)
 #     that Bris was trained on — see docs/INPUTS.md
 #

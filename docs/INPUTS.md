@@ -130,7 +130,7 @@ drop: [sdor, slor, cp, u_600, v_600, w_600, q_600, z_600, t_600]
 | Source | Public? | Status |
 |---|---|---|
 | MEPS 2.5 km (`aifs-meps-2.5km-...-v7.zarr`) | yes, thredds.met.no | usable |
-| ERA5 N320 land/cloud/radiation | yes, via CDS | usable |
+| ERA5 N320 land/cloud/radiation | yes, via CDS | usable — see below |
 | IFS `aifs-od-an-oper-...-n320` | **no** — MARS class `od` | applied for, not granted |
 
 So only the *atmospheric* part is blocked, and six of the surface fields
@@ -142,6 +142,27 @@ initialising from `ea` is a distribution shift and some skill loss is expected.
 That is acceptable for the current milestone, which is *the model runs and the
 output is physical* — not a verification score. It must be revisited before any
 result is quoted, and certainly before fine-tuning.
+
+### ERA5 must come from era5-complete, not the standard CDS datasets
+
+Verified 2026-08-26. The standard `reanalysis-era5-single-levels` /
+`-pressure-levels` datasets return a **regular 0.25 deg lat/lon grid**, which
+does not match the checkpoint's graph. The global side has to be native N320 —
+exactly the 536,600 nodes read out of the checkpoint — so regridding is not an
+option.
+
+Native N320 comes from **`reanalysis-era5-complete`**:
+
+- API only, no web form
+- served from the MARS tape archive: hours to days, even for two states
+- needs a registered account, and the licence accepted once through the CDS web
+  form before the API returns anything
+- no extra licence beyond that
+
+Two consequences. Submit the request as soon as the account exists rather than
+waiting for the MEPS side — the tape queue is the long pole. And CDS now uses
+ECMWF sign-in, so the ECMWF account requested for the anemoi catalogue may cover
+this too; check before creating a second one.
 
 ## 4b. The datasets are not published — they have to be built
 
