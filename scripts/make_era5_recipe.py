@@ -115,6 +115,8 @@ def main() -> int:
 #     anemoi-datasets version
 #   * ERA5 retrieval needs credentials in ~/.cdsapirc, and the licence must be
 #     accepted once through the CDS web form before the API will serve anything
+#   * cdsapi is NOT in the inference lockfile — build datasets in a separate
+#     environment, see docs/INPUTS.md
 #   * this is a MARS-style request (class: ea, grid: N320), which means
 #     `reanalysis-era5-complete` rather than the standard CDS ERA5 datasets.
 #     The standard ones return a regular 0.25 deg lat/lon grid, which does NOT
@@ -139,6 +141,11 @@ dates:
 input:
   join:
     - mars:
+        # Routes this MARS-style request through the CDS API instead of
+        # requiring direct MARS access. era5-complete is the only ERA5 product
+        # that serves the native N320 grid; the standard CDS datasets return a
+        # regular 0.25 deg grid, which does not match the checkpoint's graph.
+        use_cdsapi_dataset: reanalysis-era5-complete
         class: ea            # ERA5. Bris was trained on 'od'.
         expver: "0001"
         stream: oper
@@ -147,6 +154,7 @@ input:
         levtype: sfc
         param: {surface}
     - mars:
+        use_cdsapi_dataset: reanalysis-era5-complete
         class: ea
         expver: "0001"
         stream: oper

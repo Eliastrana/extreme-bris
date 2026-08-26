@@ -164,6 +164,20 @@ waiting for the MEPS side — the tape queue is the long pole. And CDS now uses
 ECMWF sign-in, so the ECMWF account requested for the anemoi catalogue may cover
 this too; check before creating a second one.
 
+**Route the request through CDS.** anemoi-datasets' `mars` source takes a
+`use_cdsapi_dataset` argument; setting it to `reanalysis-era5-complete` sends a
+MARS-style request (`class: ea`, `grid: N320`) over the CDS API rather than
+needing direct MARS access. The recipe generator emits this.
+
+**Build datasets in a separate environment.** `cdsapi` is not in the inference
+lockfile, so the environment `setup_env.sh` builds cannot reach CDS at all.
+Rather than perturb an environment that is verified for inference:
+
+    uv venv ~/bris-data-env
+    uv pip install --python ~/bris-data-env "anemoi-datasets[all]" cdsapi
+
+Then put the CDS key in `~/.cdsapirc` and build with that environment.
+
 ## 4b. The datasets are not published — they have to be built
 
 Checked 2026-08-25: there is no downloadable anemoi-format zarr for either side
