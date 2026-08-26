@@ -117,6 +117,13 @@ def main() -> int:
         # tp/ssrd/strd are accumulations and do not exist in the analysis
         # stream. This source pulls them from forecasts and accumulates over
         # the period, matching the dataset frequency.
+        #
+        # The key is `accumulation_period`, not `user_accumulation_period` —
+        # the YAML entrypoint is accumulations(context, dates,
+        # use_cdsapi_dataset=None, **request), so anything else falls through
+        # into the MARS request and is rejected there. No `type:` here either:
+        # the source selects the forecast stream itself. For class ea it
+        # applies data_accumulation_period=1 with base_times (6, 18).
         use_cdsapi_dataset: reanalysis-era5-complete
         class: ea
         expver: "0001"
@@ -124,7 +131,7 @@ def main() -> int:
         grid: N320
         levtype: sfc
         param: {accum}
-        user_accumulation_period: {step_h}
+        accumulation_period: {step_h}
 """
 
     yaml = f"""# anemoi-datasets recipe — global N320 side of the Bris cutout.
