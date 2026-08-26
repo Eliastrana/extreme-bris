@@ -151,13 +151,18 @@ It emits 89 stored fields, 17 surface and 6 x 12 upper-air, over the two states
 `multistep_input: 2` requires. The `input:` stanza still needs checking against
 the installed anemoi-datasets version, and ERA5 needs CDS credentials.
 
-**Worth doing first: ask MET.** Neither the Bris paper (Nordhagen et al.,
-arXiv:2511.23043) nor the HourGlass paper (Ingstad et al., arXiv:2607.11457)
-carries a data availability statement — HourGlass publishes code only, pointing
-at `ecmwf/anemoi-core` branch `feature/ens_interp`. The datasets are described
-in prose and not released, so there is no published route to them and asking is
-the intended one. The authors built these datasets and may simply share them, or
-share the recipes they used. That would replace days of dataset engineering with an email,
+**But there is a catalogue.** MET's own regional tutorial points at
+`https://anemoi.ecmwf.int/datasets`, which lists ready-made anemoi datasets with
+S3 download links and paths on LUMI and Leonardo. It is gated behind ECMWF
+login, not unpublished — verified: `/datasets` returns 302 to a login and the
+API returns 401. Norway is an ECMWF member state, so credentials are plausibly
+obtainable through UiO or Simula.
+
+That reframes the ask: not "send me your data", but "are the Bris datasets in
+the catalogue, and how do I get access". See `docs/PUBLIC_RESOURCES.md` for the
+full audit of what is already public — including `metno/anemoi-regional-tutorial`,
+MET's own guide to building regional datasets, which is the reference this
+recipe generator should be checked against. That would replace days of dataset engineering with an email,
 and it also settles whether ERA5 is an acceptable substitute for `od` in their
 view. Building from scratch is the fallback, not the obvious first move.
 
@@ -242,8 +247,8 @@ thredds.met.no, and the NetCDF headers carry the full projection, spacing and
 extent. That pins the grid geometry even without the anemoi dataset.
 
 **4. Ask MET.** Still worth doing, but for the question routes 1-3 cannot
-answer: whether substituting ERA5 for the operational analysis is acceptable,
-and whether they will share the datasets outright. Not for the grid.
+answer: whether substituting ERA5 for the operational analysis is acceptable.
+Not for the grid.
 
 ### Unverified: where normalisation statistics come from
 
