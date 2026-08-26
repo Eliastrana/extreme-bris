@@ -1,0 +1,105 @@
+# anemoi-datasets recipe — MEPS 2.5 km, the LAM side of the Bris cutout.
+#
+# FIRST DRAFT, NOT YET RUN. The variable names, grid and levels below were read
+# off the archive (see docs/MEPS.md) and are trustworthy. The filter wiring —
+# argument names, ordering, whether rotation happens before or after renaming —
+# is inferred from the anemoi-datasets 0.5.24 source and will need iterating
+# against real error messages.
+#
+# Build with:
+#   ~/bris-data-env/bin/anemoi-datasets create bris/configs/meps_2p5km.yaml \
+#       ~/bris-data/meps-2p5km-2025-6h-v1.zarr
+#
+# Verified about the source data:
+#   * grid is x=949, y=1069 on projection_lambert — exactly the pre-trim extent
+#     read out of the checkpoint graph, so no domain fitting is needed
+#   * pressure levels are 50..1000 with 800 extra and no 600; we take the 12 the
+#     model wants and leave 800 out
+#   * licence is NLOD / CC BY 4.0, no authentication
+#
+# Three traps, all of which produce output that runs and looks plausible:
+#   1. x_wind/y_wind are grid-relative and must be rotated to earth-relative
+#   2. upward_air_velocity_pl is m/s; ECMWF w is Pa/s — needs wz_to_w, which
+#      changes both magnitude and sign
+#   3. radiation must be the accumulated integral_of_* form, not instantaneous
+
+dates:
+  start: 2025-03-31T18:00:00
+  end: 2025-04-01T00:00:00
+  frequency: 6h
+
+input:
+  join:
+
+    # ---- surface -----------------------------------------------------------
+    - pipe:
+        - opendap:
+            url: https://thredds.met.no/thredds/dodsC/meps25epsarchive/{date:strftime(%Y)}/{date:strftime(%m)}/{date:strftime(%d)}/meps_det_sfc_{date:strftime(%Y%m%d)}T{date:strftime(%H)}Z.ncml
+
+        # Rotate before renaming, while the MEPS names still apply.
+        # source_projection is left unset so it is taken from the field's own
+        # projection metadata (projection_lambert).
+        - rotate_winds:
+            x_wind: x_wind_10m
+            y_wind: y_wind_10m
+
+        # MEPS has no 2m dewpoint; derive it from relative humidity.
+        - single_level_relative_humidity_to_dewpoint:
+            t: air_temperature_2m
+            rh: relative_humidity_2m
+            td: 2d
+
+        - rename:
+            air_temperature_2m: 2t
+            air_temperature_0m: skt
+            air_pressure_at_sea_level: msl
+            surface_air_pressure: sp
+            land_area_fraction: lsm
+            surface_geopotential: z
+            cloud_area_fraction: tcc
+            high_type_cloud_area_fraction: hcc
+            medium_type_cloud_area_fraction: mcc
+            low_type_cloud_area_fraction: lcc
+            lwe_thickness_of_atmosphere_mass_content_of_water_vapor: tcw
+            precipitation_amount_acc: tp
+            integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time: ssrd
+            integral_of_surface_downwelling_longwave_flux_in_air_wrt_time: strd
+            x_wind_10m: 10u
+            y_wind_10m: 10v
+
+    # ---- pressure levels ---------------------------------------------------
+    - pipe:
+        - opendap:
+            url: https://thredds.met.no/thredds/dodsC/meps25epsarchive/{date:strftime(%Y)}/{date:strftime(%m)}/{date:strftime(%d)}/meps_det_pl_{date:strftime(%Y%m%d)}T{date:strftime(%H)}Z.ncml
+
+        - rotate_winds:
+            x_wind: x_wind_pl
+            y_wind: y_wind_pl
+
+        # m/s -> Pa/s. Needs temperature and the pressure coordinate; without
+        # this, w is wrong by roughly a factor of ten and has the wrong sign.
+        - wz_to_w:
+            wz: upward_air_velocity_pl
+            t: air_temperature_pl
+            w: w
+
+        - rename:
+            air_temperature_pl: t
+            specific_humidity_pl: q
+            geopotential_pl: z
+            x_wind_pl: u
+            y_wind_pl: v
+
+# TODO, in the order they will probably bite:
+#   * level selection — 800 hPa must be dropped, leaving the model's 12. Whether
+#     that is a kwarg on the opendap source or a separate step is unresolved;
+#     the 0.5.24 docs for this source are one line long.
+#   * whether `2d` survives renaming, since the dewpoint filter names its output
+#     via `td` before `rename` runs
+#   * accumulated fields are zero at lead time 0. Harmless: tp, ssrd and strd
+#     are diagnostic and not model inputs, but they must exist as columns.
+#   * field_shape must come out 2D (949 x 1069) or trim_edge refuses the
+#     dataset with "TrimEdge only works on regular grids"
+
+output:
+  statistics: valid_datetime
