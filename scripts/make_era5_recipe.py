@@ -117,6 +117,10 @@ def main() -> int:
 #     accepted once through the CDS web form before the API will serve anything
 #   * cdsapi is NOT in the inference lockfile — build datasets in a separate
 #     environment, see docs/INPUTS.md
+#   * `output.order_by` is deliberately omitted. Newer anemoi-datasets rejects
+#     it as deprecated; 0.5.24 defaults it to
+#     ['valid_datetime', 'param_level', 'number'], which is what newer versions
+#     hard-code. Omitting it behaves identically on both.
 #   * this is a MARS-style request (class: ea, grid: N320), which means
 #     `reanalysis-era5-complete` rather than the standard CDS ERA5 datasets.
 #     The standard ones return a regular 0.25 deg lat/lon grid, which does NOT
@@ -165,7 +169,6 @@ input:
         param: {sorted(levels)}
 
 output:
-  order_by: [valid_datetime, param_level]
   statistics: valid_datetime
 """
     args.out.write_text(yaml)

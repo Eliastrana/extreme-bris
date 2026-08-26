@@ -175,7 +175,13 @@ Rather than perturb an environment that is verified for inference:
 
     source ~/extreme-bris/scripts/env.sh    # REQUIRED: eX3 re-signs TLS
     uv venv ~/bris-data-env
-    uv pip install --python ~/bris-data-env "anemoi-datasets[all]" cdsapi
+    uv pip install --python ~/bris-data-env "anemoi-datasets[all]==0.5.24" cdsapi
+
+**Pin 0.5.24, matching the inference lockfile.** A dataset written by a newer
+anemoi-datasets may carry a format version the pinned reader refuses, and that
+would only surface when the forecast is run — long after the dataset is built.
+0.5.24 supports everything needed here: `use_cdsapi_dataset` is in its
+`mars` source, and `trim_edge` is in its `TrimEdge`.
 
 Without the first line `uv` fails with `invalid peer certificate: UnknownIssuer`,
 because it uses its own bundled roots rather than the system trust store. Every
