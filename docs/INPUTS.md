@@ -164,6 +164,16 @@ waiting for the MEPS side — the tape queue is the long pole. And CDS now uses
 ECMWF sign-in, so the ECMWF account requested for the anemoi catalogue may cover
 this too; check before creating a second one.
 
+**Accumulated fields need a separate source.** `tp`, `ssrd` and `strd` are
+accumulations. ERA5's analysis stream does not carry them — they exist only in
+the forecast stream, accumulated over a period. Requesting them with `type: an`
+**drops them silently**: the build succeeds and produces a dataset with 86
+variables instead of 89, with no error anywhere. It surfaces only as a count in
+the log, or later as a failure to select `tp` when the cutout is assembled.
+
+The recipe generator now emits a third join branch using the `accumulations`
+source, which pulls from forecasts and accumulates over the dataset frequency.
+
 **Route the request through CDS.** anemoi-datasets' `mars` source takes a
 `use_cdsapi_dataset` argument; setting it to `reanalysis-era5-complete` sends a
 MARS-style request (`class: ea`, `grid: N320`) over the CDS API rather than

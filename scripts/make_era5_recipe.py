@@ -23,6 +23,12 @@ import json
 import sys
 from pathlib import Path
 
+# Accumulated fields. ERA5's analysis stream does not carry these — they exist
+# only in the forecast stream, as accumulations over a period. Requesting them
+# with type: an silently drops them, which shows up as a dataset with three
+# fewer variables than expected and no error anywhere.
+ACCUMULATED = {"tp", "ssrd", "strd", "cp", "sf", "e", "ro", "sshf", "slhf", "ssr", "str", "tsr", "ttr"}
+
 # Computed by anemoi-datasets at load time; never stored in the dataset.
 COMPUTED = {
     "cos_julian_day", "sin_julian_day", "cos_local_time", "sin_local_time",
@@ -92,7 +98,9 @@ def main() -> int:
     if not fields:
         print("ERROR: no variables found in metadata", file=sys.stderr)
         return 1
-    surface, levels = split(fields)
+    surface_all, levels = split(fields)
+    surface = [f for f in surface_all if f not in ACCUMULATED]
+    accum = [f for f in surface_all if f in ACCUMULATED]
 
     step_h = int(args.frequency.rstrip("h"))
     t0 = dt.datetime.fromisoformat(args.date)
@@ -102,6 +110,22 @@ def main() -> int:
     if len({tuple(v) for v in levels.values()}) > 1:
         print("WARNING: pressure levels differ between variables; using the union",
               file=sys.stderr)
+
+    accum_block = ""
+    if accum:
+        accum_block = f"""    - accumulations:
+        # tp/ssrd/strd are accumulations and do not exist in the analysis
+        # stream. This source pulls them from forecasts and accumulates over
+        # the period, matching the dataset frequency.
+        use_cdsapi_dataset: reanalysis-era5-complete
+        class: ea
+        expver: "0001"
+        stream: oper
+        grid: N320
+        levtype: sfc
+        param: {accum}
+        user_accumulation_period: {step_h}
+"""
 
     yaml = f"""# anemoi-datasets recipe — global N320 side of the Bris cutout.
 #
@@ -167,7 +191,7 @@ input:
         levtype: pl
         level: {lev_set}
         param: {sorted(levels)}
-
+{accum_block}
 output:
   statistics: valid_datetime
 """
@@ -176,6 +200,7 @@ output:
     print(f"wrote {args.out}")
     print(f"  stored fields : {len(fields)}")
     print(f"  surface       : {len(surface)}  {', '.join(surface)}")
+    print(f"  accumulated   : {len(accum)}  {', '.join(accum)}  (forecast stream)")
     print(f"  upper-air     : {len(levels)} x {len(lev_set)} levels = "
           f"{len(levels) * len(lev_set)}")
     print(f"  levels        : {lev_set}")
