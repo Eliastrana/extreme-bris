@@ -185,7 +185,19 @@ Rather than perturb an environment that is verified for inference:
 
     source ~/extreme-bris/scripts/env.sh    # REQUIRED: eX3 re-signs TLS
     uv venv ~/bris-data-env
-    uv pip install --python ~/bris-data-env "anemoi-datasets[all]==0.5.24" cdsapi
+    uv pip install --python ~/bris-data-env \
+        "anemoi-datasets[all]==0.5.24" "anemoi-utils==0.4.23" cdsapi
+
+**Pin `anemoi-utils` too.** Pinning only anemoi-datasets is not enough: 0.5.24's
+`fix_provenance` assumes `module_versions` values are strings, while newer
+anemoi-utils records dicts, and the build dies with
+`'dict' object has no attribute 'startswith'` in the `patch` step. The lockfile
+pairs 0.5.24 with anemoi-utils 0.4.23.
+
+That failure comes at step 7 of 9, after `init`, `load` and `finalise` — so the
+data and statistics are already written and the dataset may well be usable.
+`patch` only tidies provenance metadata, which nothing at inference reads. Check
+with `anemoi-datasets inspect` before assuming a rebuild is needed.
 
 **Pin 0.5.24, matching the inference lockfile.** A dataset written by a newer
 anemoi-datasets may carry a format version the pinned reader refuses, and that
