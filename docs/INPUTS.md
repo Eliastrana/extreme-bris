@@ -23,6 +23,21 @@ relaxation zone where the LAM is nudged toward its host model and is not
 physically trustworthy. This is not optional; it is part of how the model was
 trained.
 
+**Verified in anemoi-datasets 0.5.24** (the version the lockfile pins), reading
+`TrimEdge` in `data/masked.py`:
+
+- `trim_edge` is present upstream — MET's `feature/trimedge` fork has been
+  merged, so the fork is not required after all
+- a scalar is accepted and expanded to all four edges, so `trim_edge: 50` is
+  valid
+- **`field_shape` must be two-dimensional**, or it raises
+  `TrimEdge only works on regular grids`
+
+That last point is a hard requirement on how the MEPS dataset is built: it has
+to carry a 2D field shape of 949 x 1069, not a flattened list of points. A
+dataset that is otherwise correct will fail here if the grid is stored as an
+unstructured sequence.
+
 Both are combined with `min_distance_km: 0` and `adjust: all`.
 
 ## 2. Variables

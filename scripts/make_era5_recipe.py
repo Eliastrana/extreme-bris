@@ -109,8 +109,10 @@ def main() -> int:
 # Variables, levels and dates are checkpoint-derived — do not edit them by hand.
 #
 # NOT generated, and needing your attention:
-#   * the `input:` stanza below is written for ERA5 via MARS/CDS and must be
-#     checked against the installed anemoi-datasets version
+#   * the `input:` stanza follows the recipe format in MET's own regional
+#     tutorial (metno/anemoi-regional-tutorial), which uses `level:` rather than
+#     MARS' `levelist:`. Still worth checking against the installed
+#     anemoi-datasets version
 #   * ERA5 retrieval needs credentials in ~/.cdsapirc
 #   * this substitutes ERA5 (class ea) for the operational analysis (class od)
 #     that Bris was trained on — see docs/INPUTS.md
@@ -144,7 +146,7 @@ input:
         type: an
         grid: N320
         levtype: pl
-        levelist: {lev_set}
+        level: {lev_set}
         param: {sorted(levels)}
 
 output:
