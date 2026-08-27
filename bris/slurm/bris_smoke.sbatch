@@ -2,9 +2,9 @@
 #SBATCH --job-name=bris-smoke
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --partition=a100q
+#SBATCH --partition=hgx2q
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:a100:1
 #SBATCH --time=01:00:00
 #SBATCH --output=logs/smoke-%j.out
 #SBATCH --error=logs/smoke-%j.err
@@ -33,7 +33,9 @@
 # which looks like a missing library and is really a wrong architecture.
 #
 # If it OOMs, walk up the ladder (see README):
-#   a100q 2x A100 40GB  ->  dgx2q 4x V100  ->  hgx2q 8x A100 80GB
+#   hgx2q is the default: its cards are 80GB rather than 40GB, and in practice
+#   a100q sits behind a long queue while hgx2q has capacity. Still one card.
+#   If it OOMs even here, raise num_gpus_per_model in the smoke config.
 #
 # Escalate by overriding on submit, e.g. four V100s on the DGX-2:
 #   sbatch --partition=dgx2q --gres=gpu:tesla:4 \
