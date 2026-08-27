@@ -119,9 +119,31 @@ input:
               - upward_air_velocity_pl
               - x_wind_pl
               - y_wind_pl
-            # MEPS carries 13 levels; the model wants 12. Documented behaviour:
-            # for Xarray-based sources `level` and `levelist` are synonyms, as
-            # are `param` and `variable`.
+            # Without a flavour, anemoi does not recognise `pressure` as a
+            # level coordinate, the level selection matches nothing, and the
+            # branch contributes zero fields — with a WARNING rather than an
+            # error, so the build "succeeds" and the dataset is simply short.
+            #
+            # A flavour replaces coordinate guessing entirely, so every
+            # coordinate has to be named here, not just the level one.
+            # Attributes available to match on: axis, name, long_name,
+            # standard_name, units.
+            flavour:
+              rules:
+                time:
+                  name: time
+                level:
+                  name: pressure
+                x:
+                  name: x
+                y:
+                  name: y
+                latitude:
+                  name: latitude
+                longitude:
+                  name: longitude
+              levtype: pl
+            # MEPS carries 13 levels; the model wants 12, so 800 is left out.
             level: [50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000]
 
         - rename:
