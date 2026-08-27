@@ -51,6 +51,11 @@ def main() -> int:
         ds.close()
         return n
 
+    def pydap_direct(url):
+        from pydap.client import open_url
+        ds = open_url(url, protocol="dap2")
+        return len(list(ds.keys()))
+
     def xr_open(url, **kw):
         ds = xr.open_dataset(url, **kw)
         n = len(ds.variables)
@@ -65,6 +70,13 @@ def main() -> int:
         ("xarray netcdf4 engine",       lambda: xr_open(BASE + ".ncml", engine="netcdf4")),
         ("xarray pydap engine",         lambda: xr_open(BASE + ".ncml", engine="pydap")),
         ("xarray pydap, no suffix",     lambda: xr_open(BASE, engine="pydap")),
+        # pydap only preserves the https scheme when `protocol` is given
+        # explicitly (handlers/dap.py, the branch around determine_protocol).
+        # Without it the scheme is guessed, becomes http, and eX3's TLS
+        # interception turns that into 421 Misdirected Request.
+        ("pydap open_url, protocol=dap2", lambda: pydap_direct(BASE + ".ncml")),
+        ("xarray pydap, protocol=dap2",  lambda: xr_open(BASE + ".ncml", engine="pydap",
+                                                         protocol="dap2")),
     ]
 
     for label, fn in cases:
