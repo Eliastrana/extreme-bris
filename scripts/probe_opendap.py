@@ -40,7 +40,20 @@ def attempt(label: str, fn) -> bool:
 
 
 def main() -> int:
+    import os
     import xarray as xr
+
+    # pydap goes through requests. Without REQUESTS_CA_BUNDLE it uses certifi,
+    # which does not know eX3's TLS-interception CA — so every https attempt
+    # fails before it starts. Earlier runs of this probe had these unset.
+    missing = [v for v in ("REQUESTS_CA_BUNDLE", "SSL_CERT_FILE", "CURL_CA_BUNDLE")
+               if not os.environ.get(v)]
+    if missing:
+        print(f"WARNING: {', '.join(missing)} unset.", file=sys.stderr)
+        print("  Run `source scripts/env.sh` first, or the pydap cases test", file=sys.stderr)
+        print("  nothing but a missing certificate authority.\n", file=sys.stderr)
+    else:
+        print(f"TLS bundle: {os.environ['REQUESTS_CA_BUNDLE']}\n")
 
     winners = []
 
@@ -51,9 +64,9 @@ def main() -> int:
         ds.close()
         return n
 
-    def pydap_direct(url):
+    def pydap_direct(url, protocol="dap2"):
         from pydap.client import open_url
-        ds = open_url(url, protocol="dap2")
+        ds = open_url(url, protocol=protocol) if protocol else open_url(url)
         return len(list(ds.keys()))
 
     def xr_open(url, **kw):
@@ -75,6 +88,11 @@ def main() -> int:
         # Without it the scheme is guessed, becomes http, and eX3's TLS
         # interception turns that into 421 Misdirected Request.
         ("pydap open_url, protocol=dap2", lambda: pydap_direct(BASE + ".ncml")),
+        # determine_protocol turns a dap2:// scheme into https explicitly
+        # (handlers/dap.py lines 151-155), which is the documented way to be
+        # unambiguous about the protocol.
+        ("pydap open_url, dap2:// scheme",
+         lambda: pydap_direct("dap2://" + BASE.split("://", 1)[1] + ".ncml", protocol=None)),
         ("xarray pydap, protocol=dap2",  lambda: xr_open(BASE + ".ncml", engine="pydap",
                                                          protocol="dap2")),
     ]
