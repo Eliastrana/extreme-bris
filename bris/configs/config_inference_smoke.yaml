@@ -1,0 +1,128 @@
+# Bris CRPS-FFT inference on eX3 — SMOKE TEST.
+#
+# Generated from config_inference_ex3.yaml with three values reduced, because
+# `bris` takes a plain --config file and has no flag for overriding them:
+#
+#   num_gpus_per_model  4 -> 1
+#   num_members         2 -> 1
+#   leadtimes          10 -> 2
+#
+# Everything else is identical. Use config_inference_ex3.yaml for real runs.
+#
+#
+# Derived from met-no/bris-forecaster configs/config_inference.yaml, with three
+# deliberate changes for this cluster:
+#
+#   1. Paths point at ${oc.env:BRIS_DATA_DIR} / ${oc.env:BRIS_MODEL_DIR} rather
+#      than MET's relative ./inputs and ./outputs, so the Slurm script controls
+#      placement without editing this file.
+#   2. A single initialisation date instead of MET's 2025-04-01..04-08 sweep.
+#      The first milestone is one forecast, not a week of them.
+#   3. dataset_global points at an ERA5 N320 build, NOT the MARS operational
+#      analysis MET used. See docs/INPUTS.md — the `od` dataset is class-od and
+#      not public, and our MARS application is still pending. Same grid and
+#      variables, different source. Expect some skill difference; the point of
+#      this run is that the model executes and the fields are physical.
+#
+# Everything else is left exactly as MET published it. In particular
+# num_gpus_per_model and num_members are unchanged, because they describe how
+# the checkpoint is sharded, not a free tuning knob.
+
+defaults:
+  - override hydra/job_logging: none
+  - override hydra/hydra_logging: none
+  - _self_
+
+run_name: bris_crps-fft_smoke
+
+output_path: ${oc.env:BRIS_OUTPUT_DIR,./outputs}
+data_path: ${oc.env:BRIS_DATA_DIR,./inputs}
+model_path: ${oc.env:BRIS_MODEL_DIR,./models}
+
+# Overridden on the command line by the Slurm script.
+start_date: 2025-04-01T00:00:00
+end_date: 2025-04-01T00:00:00
+
+checkpoints:
+  forecaster:
+    checkpoint_path: ${model_path}/bris-forecaster/bris-crpsfft_inference.ckpt
+    leadtimes: 2                  # 2 x 6h = 12h — smoke test only
+    static_forcings_dataset: null
+    switch_graph: null
+
+timestep: 6h
+frequency: 6h
+workdir: ${output_path}
+
+dataset:
+  cutout:
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_lam}
+      reorder: sort
+      trim_edge: 50               # drops 50 cells ~= 125 km of MEPS relaxation zone
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_global}
+      select: ${selected_vars}
+      reorder: sort
+  min_distance_km: 0
+  adjust: all
+
+dataloader:
+  batch_size: 1
+  prefetch_factor: 2
+  num_workers: 1
+  pin_memory: True
+
+  read_group_size: 1              # upstream comment: do not change, not fully implemented
+
+  datamodule:
+    _target_: bris.data.dataset.NativeGridDataset
+    _convert_: all
+
+hardware:
+  paths:
+    data: ${data_path}
+  files:
+    # SUBSTITUTED: ERA5 N320 in place of MET's aifs-od-an-oper-...-n320 MARS build.
+    dataset_global: era5-n320-2025-6h-v1.zarr
+    dataset_lam: meps-2p5km-2025-6h-v1.zarr
+
+  num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
+  num_gpus_per_model: 1           # unsharded; MET used 4 on 64 GB cards
+  num_members: 1                  # single member; no ensemble
+  num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
+
+model:
+  _target_: bris.model.brispredictor.BrisPredictor
+  _convert_: all
+
+routing:
+  - decoder_index: 0
+    domain_index: 0
+    outputs:
+      - netcdf:
+          filename_pattern: ${output_path}/nordic_${run_name}_%Y-%m-%dT%HZ.nc
+          variables: [2t, msl, tp]
+          extra_variables: [ws]
+          domain_name: "meps"
+  - decoder_index: 0
+    domain_index: 1
+    outputs:
+      - netcdf:
+          filename_pattern: ${output_path}/global_${run_name}_%Y-%m-%dT%HZ.nc
+          variables: [2t, msl, tp]
+          extra_variables: [ws]
+          interp_res: 0.25
+
+# 98 entries: 89 that must exist in the input dataset, plus 9 forcings that
+# anemoi-datasets computes on the fly (the sin/cos time and position terms and
+# insolation). Order here is MET's; the authoritative order lives in the
+# checkpoint - dump it with scripts/inspect_checkpoint.py before building data.
+selected_vars: [
+  10u, 10v, 2d, 2t, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, hcc,
+  insolation, lcc, lsm, mcc, msl, q_100, q_1000, q_150, q_200, q_250, q_300, q_400, q_50, q_500,
+  q_700, q_850, q_925, sin_julian_day, sin_latitude, sin_local_time, sin_longitude, skt, sp,
+  ssrd, strd, t_100, t_1000, t_150, t_200, t_250, t_300, t_400, t_50, t_500, t_700, t_850,
+  t_925, tcc, tcw, tp, u_100, u_1000, u_150, u_200, u_250, u_300, u_400, u_50, u_500, u_700,
+  u_850, u_925, v_100, v_1000, v_150, v_200, v_250, v_300, v_400, v_50, v_500, v_700, v_850,
+  v_925, w_100, w_1000, w_150, w_200, w_250, w_300, w_400, w_50, w_500, w_700, w_850, w_925, z,
+  z_100, z_1000, z_150, z_200, z_250, z_300, z_400, z_50, z_500, z_700, z_850, z_925
+]

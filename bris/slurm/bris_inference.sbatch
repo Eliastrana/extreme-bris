@@ -122,11 +122,10 @@ for date in $BRIS_DATES; do
   start=$SECONDS
 
   uv run bris \
-    --config-path="$(dirname "$CONFIG")" \
-    --config-name="$(basename "${CONFIG%.yaml}")" \
-    start_date="$date" \
-    end_date="$date" \
-    output_path="$OUTPUT_DIR"
+    --config "$CONFIG" \
+    -sd "$date" \
+    -ed "$date" \
+    -wd "$OUTPUT_DIR"
 
   echo ">> $date finished in $((SECONDS - start))s"
   touch "$marker"

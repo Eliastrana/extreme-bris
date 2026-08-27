@@ -44,7 +44,7 @@ set -euo pipefail
 ENV_DIR="${BRIS_ENV_DIR:-$HOME/bris-env}"
 REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
 OUTPUT_DIR="${BRIS_OUTPUT_DIR:-$HOME/bris-runs/smoke}"
-CONFIG="${BRIS_CONFIG:-$REPO_DIR/bris/configs/config_inference_ex3.yaml}"
+CONFIG="${BRIS_CONFIG:-$REPO_DIR/bris/configs/config_inference_smoke.yaml}"
 
 # The config resolves these with oc.env, so they must be exported, not just set.
 export BRIS_MODEL_DIR="${BRIS_MODEL_DIR:-$HOME/bris-models}"
@@ -131,15 +131,15 @@ fi
 cd "$ENV_DIR"
 
 start=$SECONDS
+# bris takes a plain --config file and argparse flags — not Hydra overrides.
+# There is no flag for num_gpus_per_model or num_members, which is why the
+# smoke values live in their own config file.
 uv run bris \
-  --config-path="$(dirname "$CONFIG")" \
-  --config-name="$(basename "${CONFIG%.yaml}")" \
-  start_date="$DATE" \
-  end_date="$DATE" \
-  output_path="$OUTPUT_DIR" \
-  hardware.num_gpus_per_model="$GPUS_PER_MODEL" \
-  hardware.num_members="$MEMBERS" \
-  checkpoints.forecaster.leadtimes="$LEADTIMES"
+  --config "$CONFIG" \
+  -sd "$DATE" \
+  -ed "$DATE" \
+  -l "$LEADTIMES" \
+  -wd "$OUT"
 
 echo
 echo "=== finished in $((SECONDS - start))s"
