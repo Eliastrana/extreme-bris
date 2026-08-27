@@ -144,5 +144,18 @@ input:
 #   * field_shape must come out 2D (949 x 1069) or trim_edge refuses the
 #     dataset with "TrimEdge only works on regular grids"
 
+build:
+  # Default is "{param}_{levelist}", but these fields carry the level under
+  # `pressure` — the coordinate's own name — so the level fell out of the name
+  # and all twelve levels of each variable collided on
+  # (valid_datetime, param, step).
+  #
+  # Naming is global, not per-branch. Surface fields have no `pressure` key; the
+  # default handles the same situation for GRIB surface fields, which have no
+  # levelist, so the missing key is expected to be dropped rather than to fail.
+  # The rename filter runs first, so this yields z_50 rather than
+  # geopotential_pl_50.
+  variable_naming: "{param}_{pressure}"
+
 output:
   statistics: valid_datetime
