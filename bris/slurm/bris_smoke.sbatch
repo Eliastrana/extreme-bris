@@ -2,7 +2,7 @@
 #SBATCH --job-name=bris-smoke
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --partition=a40q
+#SBATCH --partition=a100q
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
 #SBATCH --time=01:00:00
@@ -27,8 +27,13 @@
 # backward, and no ensemble here — so it is plausible this fits on a single
 # 48 GB A40. Plausible, not established. That is the point of the job.
 #
+# a40q is NOT usable: those nodes are aarch64, and this environment is x86/CUDA
+# from MET's lockfile. A job there dies with
+#   x86_64-binfmt-P: Could not open '/lib64/ld-linux-x86-64.so.2'
+# which looks like a missing library and is really a wrong architecture.
+#
 # If it OOMs, walk up the ladder (see README):
-#   a40q 1x A40 48GB  ->  a100q 2x A100 40GB  ->  dgx2q 4x V100  ->  hgx2q 8x A100 80GB
+#   a100q 2x A100 40GB  ->  dgx2q 4x V100  ->  hgx2q 8x A100 80GB
 #
 # Escalate by overriding on submit, e.g. four V100s on the DGX-2:
 #   sbatch --partition=dgx2q --gres=gpu:tesla:4 \

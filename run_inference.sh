@@ -113,6 +113,21 @@ step "6/7  verifying both datasets"
 echo
 "$DATA_ENV/bin/anemoi-datasets" inspect "$MEPS" | sed -n '1,12p'
 
+# The join must contribute both branches. A missing branch is silent: the build
+# succeeds and the dataset is simply short, which only shows up as a variable
+# count that does not match the checkpoint.
+meps_vars=$("$DATA_ENV/bin/anemoi-datasets" inspect "$MEPS" \
+            | grep -oE '[0-9]+ x [0-9,]+ x' | head -n 1 | awk '{print $3}')
+era5_vars=$("$DATA_ENV/bin/anemoi-datasets" inspect "$ERA5" \
+            | grep -oE '[0-9]+ x [0-9,]+ x' | head -n 1 | awk '{print $3}')
+echo
+echo "  variables: MEPS ${meps_vars:-?}, ERA5 ${era5_vars:-?} (both must be 89)"
+if [[ "${meps_vars:-0}" != "89" || "${era5_vars:-0}" != "89" ]]; then
+  echo "  Variable count does not match the checkpoint's 89." >&2
+  echo "  The cutout cannot be assembled from these. Stopping." >&2
+  exit 6
+fi
+
 # trim_edge needs a 2D field shape on the LAM side, and refuses anything else.
 if "$DATA_ENV/bin/anemoi-datasets" inspect "$MEPS" | grep -q "Field shape.*\[.*,.*\]"; then
   echo "  MEPS field shape is 2D — trim_edge will accept it"
