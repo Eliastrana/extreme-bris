@@ -51,6 +51,25 @@ dataset_ok() {
   [[ -e "$1" ]] && "$DATA_ENV/bin/anemoi-datasets" inspect "$1" >/dev/null 2>&1
 }
 
+# Variable count, read from the zarr attributes. Parsing `inspect` output for it
+# is a trap: the shape line separates fields with U+00D7, not an ASCII x.
+n_vars() {
+  "$DATA_ENV/bin/python" -c "
+import sys, zarr
+try:
+    print(len(zarr.open(sys.argv[1], mode='r').attrs['variables']))
+except Exception:
+    print(0)
+" "$1" 2>/dev/null
+}
+
+# Openable AND holding what the checkpoint needs. A dataset can be perfectly
+# valid and still be missing a whole branch of the join, which is how a
+# 17-variable MEPS dataset survived a run and skipped its own rebuild.
+dataset_complete() {
+  dataset_ok "$1" && [[ "$(n_vars "$1")" == "89" ]]
+}
+
 # --- state ------------------------------------------------------------------
 step "state"
 printf "  %-26s %s\n" "environment"  "$([[ -d $BRIS_ENV_DIR/.venv ]] && echo ok || echo MISSING)"
@@ -72,13 +91,13 @@ for req in "$BRIS_ENV_DIR/.venv" "$BRIS_CKPT" "$ERA5"; do
 done
 
 # --- 5. MEPS ----------------------------------------------------------------
-if dataset_ok "$MEPS"; then
+if dataset_complete "$MEPS"; then
   step "5/7  MEPS dataset — already built"
   "$DATA_ENV/bin/python" "$REPO_DIR/scripts/postprocess_meps.py" "$MEPS" --dry-run \
       >/dev/null 2>&1 || echo "  (already post-processed)"
 else
   if have "$MEPS"; then
-    step "5/7  MEPS dataset — removing partial zarr from a failed build"
+    step "5/7  MEPS dataset — discarding incomplete build ($(n_vars "$MEPS") of 89 variables)"
     rm -rf "$MEPS"
   fi
   step "5/7  MEPS dataset — building (UNTESTED RECIPE, expect to iterate)"
@@ -89,8 +108,9 @@ else
   # A directory appearing is not a dataset. anemoi-datasets creates the zarr
   # before it fills it, so a failed build leaves a shell that `test -e` accepts
   # and `open_dataset` then rejects with a bare AttributeError.
-  if ! dataset_ok "$MEPS"; then
+  if ! dataset_complete "$MEPS"; then
     echo
+    echo "MEPS build produced $(n_vars "$MEPS") of 89 variables." >&2
     echo "MEPS build failed. This is the expected stopping point today." >&2
     echo "The last 20 lines are the thing to work from:" >&2
     tail -n 20 "$LOGS/meps-build.log" >&2
@@ -116,10 +136,8 @@ echo
 # The join must contribute both branches. A missing branch is silent: the build
 # succeeds and the dataset is simply short, which only shows up as a variable
 # count that does not match the checkpoint.
-meps_vars=$("$DATA_ENV/bin/anemoi-datasets" inspect "$MEPS" \
-            | grep -oE '[0-9]+ x [0-9,]+ x' | head -n 1 | awk '{print $3}')
-era5_vars=$("$DATA_ENV/bin/anemoi-datasets" inspect "$ERA5" \
-            | grep -oE '[0-9]+ x [0-9,]+ x' | head -n 1 | awk '{print $3}')
+meps_vars=$(n_vars "$MEPS")
+era5_vars=$(n_vars "$ERA5")
 echo
 echo "  variables: MEPS ${meps_vars:-?}, ERA5 ${era5_vars:-?} (both must be 89)"
 if [[ "${meps_vars:-0}" != "89" || "${era5_vars:-0}" != "89" ]]; then
