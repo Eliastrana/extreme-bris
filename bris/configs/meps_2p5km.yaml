@@ -18,7 +18,15 @@
 #   * licence is NLOD / CC BY 4.0, no authentication
 #
 # Three traps, all of which produce output that runs and looks plausible:
-#   1. x_wind/y_wind are grid-relative and must be rotated to earth-relative
+#   1. x_wind/y_wind are grid-relative and must be rotated to earth-relative.
+#      NOT DONE HERE: anemoi's rotate_winds filter reads
+#      f.metadata(namespace="mars")["param"], and for xarray-sourced fields
+#      _as_mars() returns {} — so it raises KeyError on any NetCDF or OPeNDAP
+#      input, in upstream 0.5.24 and in MET's fork alike. Renaming first does
+#      not help: RenamedFieldMapping delegates namespace lookups straight
+#      through. Rotation is applied afterwards instead, by
+#      scripts/rotate_meps_winds.py, which is mathematically equivalent — the
+#      transform is pointwise and depends only on grid geometry.
 #   2. upward_air_velocity_pl is m/s; ECMWF w is Pa/s — needs wz_to_w, which
 #      changes both magnitude and sign
 #   3. radiation must be the accumulated integral_of_* form, not instantaneous
@@ -44,13 +52,6 @@ input:
               # error even with the CA configured in ~/.dodsrc; pydap is pure
               # Python, goes through requests, and honours REQUESTS_CA_BUNDLE.
               engine: pydap
-
-        # Rotate before renaming, while the MEPS names still apply.
-        # source_projection is left unset so it is taken from the field's own
-        # projection metadata (projection_lambert).
-        - rotate_winds:
-            x_wind: x_wind_10m
-            y_wind: y_wind_10m
 
         # MEPS has no 2m dewpoint; derive it from relative humidity.
         - single_level_relative_humidity_to_dewpoint:
@@ -86,10 +87,6 @@ input:
             # for Xarray-based sources `level` and `levelist` are synonyms, as
             # are `param` and `variable`.
             level: [50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000]
-
-        - rotate_winds:
-            x_wind: x_wind_pl
-            y_wind: y_wind_pl
 
         # m/s -> Pa/s. Needs temperature and the pressure coordinate; without
         # this, w is wrong by roughly a factor of ten and has the wrong sign.
