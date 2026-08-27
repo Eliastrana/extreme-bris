@@ -147,7 +147,16 @@ if [[ "${meps_vars:-0}" != "89" || "${era5_vars:-0}" != "89" ]]; then
 fi
 
 # trim_edge needs a 2D field shape on the LAM side, and refuses anything else.
-if "$DATA_ENV/bin/anemoi-datasets" inspect "$MEPS" | grep -q "Field shape.*\[.*,.*\]"; then
+# Read it from the attributes: piping `inspect` into grep -q makes grep exit at
+# the first match, which breaks the pipe and misreports the result.
+meps_shape=$("$DATA_ENV/bin/python" -c "
+import sys, zarr
+try:
+    print(len(zarr.open(sys.argv[1], mode='r').attrs.get('field_shape', [])))
+except Exception:
+    print(0)
+" "$MEPS" 2>/dev/null)
+if [[ "${meps_shape:-0}" == "2" ]]; then
   echo "  MEPS field shape is 2D — trim_edge will accept it"
 else
   echo "  MEPS field shape is not 2D." >&2
