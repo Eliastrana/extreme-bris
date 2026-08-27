@@ -64,11 +64,15 @@ else
   step "5/7  MEPS dataset — building (UNTESTED RECIPE, expect to iterate)"
   "$DATA_ENV/bin/anemoi-datasets" create \
       "$REPO_DIR/bris/configs/meps_2p5km.yaml" "$MEPS" 2>&1 | tee "$LOGS/meps-build.log"
-  if ! have "$MEPS"; then
+  # A directory appearing is not a dataset. anemoi-datasets creates the zarr
+  # before it fills it, so a failed build leaves a shell that `test -e` accepts
+  # and `open_dataset` then rejects with a bare AttributeError.
+  if ! "$DATA_ENV/bin/anemoi-datasets" inspect "$MEPS" >/dev/null 2>&1; then
     echo
     echo "MEPS build failed. This is the expected stopping point today." >&2
     echo "The last 20 lines are the thing to work from:" >&2
     tail -n 20 "$LOGS/meps-build.log" >&2
+    [[ -e "$MEPS" ]] && echo "(removing the partial zarr at $MEPS)" >&2 && rm -rf "$MEPS"
     exit 2
   fi
 fi
@@ -83,8 +87,10 @@ echo
 if "$DATA_ENV/bin/anemoi-datasets" inspect "$MEPS" | grep -q "Field shape.*\[.*,.*\]"; then
   echo "  MEPS field shape is 2D — trim_edge will accept it"
 else
-  echo "  WARNING: MEPS field shape does not look 2D." >&2
-  echo "  trim_edge will refuse with 'TrimEdge only works on regular grids'." >&2
+  echo "  MEPS field shape is not 2D." >&2
+  echo "  trim_edge will refuse with 'TrimEdge only works on regular grids'," >&2
+  echo "  so there is no point spending a GPU allocation on this. Stopping." >&2
+  exit 4
 fi
 
 # --- 7. forecast ------------------------------------------------------------

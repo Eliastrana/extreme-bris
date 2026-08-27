@@ -94,7 +94,11 @@ CKPT="$BRIS_MODEL_DIR/bris-forecaster/bris-crpsfft_inference.ckpt"
 }
 
 missing=0
-for ds in meps-2p5km-202501-202604-6h-v7.zarr era5-n320-2025-6h-v1.zarr; do
+# Read the dataset names out of the config rather than repeating them here —
+# they were duplicated, drifted apart, and the job then looked for a file the
+# config had stopped naming.
+mapfile -t datasets < <(grep -E "^\s+dataset_(lam|global):" "$CONFIG" | awk '{print $2}')
+for ds in "${datasets[@]}"; do
   if [[ ! -e "$BRIS_DATA_DIR/$ds" ]]; then
     echo "MISSING INPUT: $BRIS_DATA_DIR/$ds" >&2
     missing=1
