@@ -62,24 +62,25 @@ input:
               engine: pydap
 
         - rename:
-            air_temperature_2m: 2t
-            air_temperature_0m: skt
-            air_pressure_at_sea_level: msl
-            surface_air_pressure: sp
-            land_area_fraction: lsm
-            surface_geopotential: z
-            cloud_area_fraction: tcc
-            high_type_cloud_area_fraction: hcc
-            medium_type_cloud_area_fraction: mcc
-            low_type_cloud_area_fraction: lcc
-            lwe_thickness_of_atmosphere_mass_content_of_water_vapor: tcw
-            precipitation_amount_acc: tp
-            integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time: ssrd
-            integral_of_surface_downwelling_longwave_flux_in_air_wrt_time: strd
-            x_wind_10m: 10u
-            y_wind_10m: 10v
-            # Holds RELATIVE HUMIDITY until postprocess_meps.py converts it.
-            relative_humidity_2m: 2d
+            param:
+              air_temperature_2m: 2t
+              air_temperature_0m: skt
+              air_pressure_at_sea_level: msl
+              surface_air_pressure: sp
+              land_area_fraction: lsm
+              surface_geopotential: z
+              cloud_area_fraction: tcc
+              high_type_cloud_area_fraction: hcc
+              medium_type_cloud_area_fraction: mcc
+              low_type_cloud_area_fraction: lcc
+              lwe_thickness_of_atmosphere_mass_content_of_water_vapor: tcw
+              precipitation_amount_acc: tp
+              integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time: ssrd
+              integral_of_surface_downwelling_longwave_flux_in_air_wrt_time: strd
+              x_wind_10m: 10u
+              y_wind_10m: 10v
+              # Holds RELATIVE HUMIDITY until postprocess_meps.py converts it.
+              relative_humidity_2m: 2d
 
     # ---- pressure levels ---------------------------------------------------
     - pipe:
@@ -93,13 +94,14 @@ input:
             level: [50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000]
 
         - rename:
-            air_temperature_pl: t
-            specific_humidity_pl: q
-            geopotential_pl: z
-            x_wind_pl: u
-            y_wind_pl: v
-            # Holds m/s until postprocess_meps.py converts it to Pa/s.
-            upward_air_velocity_pl: w
+            param:
+              air_temperature_pl: t
+              specific_humidity_pl: q
+              geopotential_pl: z
+              x_wind_pl: u
+              y_wind_pl: v
+              # Holds m/s until postprocess_meps.py converts it to Pa/s.
+              upward_air_velocity_pl: w
 
 # TODO, in the order they will probably bite:
 #   * whether `2d` survives renaming, since the dewpoint filter names its output
