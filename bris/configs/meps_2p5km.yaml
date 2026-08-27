@@ -35,6 +35,15 @@ input:
     - pipe:
         - opendap:
             url: https://thredds.met.no/thredds/dodsC/meps25epsarchive/{date:strftime(%Y)}/{date:strftime(%m)}/{date:strftime(%d)}/meps_det_sfc_{date:strftime(%Y%m%d)}T{date:strftime(%H)}Z.ncml
+            options:
+              # pydap rather than the netcdf4 C library. The .ncml is a
+              # joinExisting aggregation over 67 per-leadtime files on MET's
+              # internal Lustre, so dodsC is the only route to the data — the
+              # underlying files are not exposed and fileServer returns the 8 KB
+              # descriptor. netCDF4's DAP client fails on it with a bare I/O
+              # error even with the CA configured in ~/.dodsrc; pydap is pure
+              # Python, goes through requests, and honours REQUESTS_CA_BUNDLE.
+              engine: pydap
 
         # Rotate before renaming, while the MEPS names still apply.
         # source_projection is left unset so it is taken from the field's own
@@ -71,6 +80,12 @@ input:
     - pipe:
         - opendap:
             url: https://thredds.met.no/thredds/dodsC/meps25epsarchive/{date:strftime(%Y)}/{date:strftime(%m)}/{date:strftime(%d)}/meps_det_pl_{date:strftime(%Y%m%d)}T{date:strftime(%H)}Z.ncml
+            options:
+              engine: pydap
+            # MEPS carries 13 levels; the model wants 12. Documented behaviour:
+            # for Xarray-based sources `level` and `levelist` are synonyms, as
+            # are `param` and `variable`.
+            level: [50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000]
 
         - rotate_winds:
             x_wind: x_wind_pl
@@ -91,9 +106,6 @@ input:
             y_wind_pl: v
 
 # TODO, in the order they will probably bite:
-#   * level selection — 800 hPa must be dropped, leaving the model's 12. Whether
-#     that is a kwarg on the opendap source or a separate step is unresolved;
-#     the 0.5.24 docs for this source are one line long.
 #   * whether `2d` survives renaming, since the dewpoint filter names its output
 #     via `td` before `rename` runs
 #   * accumulated fields are zero at lead time 0. Harmless: tp, ssrd and strd

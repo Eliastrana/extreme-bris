@@ -89,12 +89,50 @@ is harmless here: all three are **diagnostic**, so they are not model inputs
 (`input.full` has 95 entries and excludes them). They still need to exist as
 columns in the dataset.
 
+## The .ncml files are aggregations, not data
+
+Worth understanding before choosing an access route. Each
+`meps_det_sfc_*.ncml` is an **8 KB NcML descriptor**, a `joinExisting`
+aggregation over 67 per-leadtime files living on MET's internal Lustre:
+
+    <netcdf location="/lustre/arkivB/.../meps_sfc_00_20250331T18Z.nc"/>
+    <netcdf location="/lustre/arkivB/.../meps_sfc_01_20250331T18Z.nc"/>
+    ...
+
+Those paths are internal, and the individual files are not exposed in the
+catalogue. So:
+
+- `fileServer` on the `.ncml` returns the descriptor, not the data
+- **`dodsC` is the only route**, because only THREDDS resolves the aggregation
+- downloading first is not an available alternative
+
+## Reading it: pydap, not netCDF4
+
+The netCDF4 C library fails on these URLs with
+`OSError: [Errno -68] NetCDF: I/O failure`, even with the system CA configured
+in `~/.dodsrc` and with `curl` returning 200 for the same URL.
+
+The fix is to use **pydap** as the Xarray engine. It is pure Python, goes
+through `requests`, and therefore honours `REQUESTS_CA_BUNDLE` like the rest of
+the stack — sidestepping the C library's DAP client entirely:
+
+    opendap:
+      url: ...
+      options:
+        engine: pydap
+
+It needs installing separately:
+
+    uv pip install --python ~/bris-data-env pydap
+
+Level selection is supported on the source directly. From the anemoi-datasets
+documentation: for Xarray-based sources `param` and `variable` are synonyms, as
+are `level` and `levelist`. So dropping 800 hPa is a `level:` list, not a
+separate filter step.
+
 ## Approach
 
-anemoi-datasets reads OPeNDAP and NetCDF directly, so the data need not be
-downloaded first. Sources worth looking at in the installed version:
-`create/sources/opendap.py`, `netcdf.py`, `xarray_support/`.
-
-`metno/anemoi-regional-tutorial` is MET's own walkthrough of this, by the Bris
-authors, and covers extending anemoi-datasets with new sources and filters. It
-is the reference to work from rather than inventing an approach.
+`metno/anemoi-regional-tutorial` is MET's own walkthrough, by the Bris authors,
+and covers extending anemoi-datasets with new sources and filters. Note that
+MET do not build from thredds themselves — `bris-anemoi-demo` points at
+pre-built zarr on Leonardo — so there is no published MEPS recipe to copy.
