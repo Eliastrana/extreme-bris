@@ -85,6 +85,32 @@ def main() -> int:
 
     print("\n=== 3. full metadata of one field\n")
     print(f"  {fl[0].metadata()}")
+
+    # The decisive test: run the selection the build runs, in isolation.
+    # LevelCoordinate.mars_names is ("level", "levelist") and normalise turns
+    # 50.0 into 50, so `level` ought to match — but the build says otherwise.
+    print("\n=== 4. the selection itself\n")
+    LEVELS = [50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000]
+    for label, kw in (
+        ("level (ints)",      dict(level=LEVELS)),
+        ("level (floats)",    dict(level=[float(x) for x in LEVELS])),
+        ("levelist",          dict(levelist=LEVELS)),
+        ("pressure",          dict(pressure=LEVELS)),
+        ("variable + level",  dict(variable=VARS, level=LEVELS)),
+        ("variable only",     dict(variable=VARS)),
+        ("no selection",      dict()),
+    ):
+        try:
+            got = fl.sel(**kw)
+            n = len(got)
+        except Exception as exc:
+            print(f"  {label:<20} raised {type(exc).__name__}: {str(exc)[:60]}")
+            continue
+        expect = "" if n else "   <- matches nothing"
+        print(f"  {label:<20} {n:>6} fields{expect}")
+
+    print("\n  Expect 6 variables x 12 levels x 67 leadtimes if a selection is")
+    print("  working; 0 means that key is not how the level is addressed.")
     return 0
 
 
