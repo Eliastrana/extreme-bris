@@ -51,6 +51,18 @@ if BRIS_CA_BUNDLE="$(_bris_find_ca_bundle)"; then
   else
     export UV_NATIVE_TLS="${UV_NATIVE_TLS:-1}"
   fi
+  # netCDF's DAP client does not read any of the above. It reads ~/.dodsrc,
+  # and without a CA there it fails opening an OPeNDAP URL with a bare
+  # "NetCDF: I/O failure" that says nothing about certificates.
+  _bris_dodsrc="$HOME/.dodsrc"
+  if ! grep -qs "^HTTP.SSL.CAINFO=" "$_bris_dodsrc" 2>/dev/null; then
+    {
+      echo "HTTP.SSL.CAINFO=$BRIS_CA_BUNDLE"
+      echo "HTTP.SSL.VALIDATE=1"
+    } >> "$_bris_dodsrc"
+    echo "note: added HTTP.SSL.CAINFO to $_bris_dodsrc for netCDF/OPeNDAP" >&2
+  fi
+  unset _bris_dodsrc
 else
   echo "WARNING: no system CA bundle found; TLS-inspecting proxies will break uv/pip" >&2
 fi
