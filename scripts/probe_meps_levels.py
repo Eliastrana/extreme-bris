@@ -25,8 +25,30 @@ VARS = ["air_temperature_pl", "x_wind_pl"]
 def main() -> int:
     import xarray as xr
 
+    # The surface branch of the build works and the pressure branch does not,
+    # both through pydap. Test them side by side before concluding anything
+    # about levels — a fetch that fails and is swallowed looks exactly like
+    # "no data found".
+    print("=== 0. can pydap open each file at all?\n")
+    SFC = URL.replace("meps_det_pl_", "meps_det_sfc_")
+    opened = {}
+    for label, u in (("sfc", SFC), ("pl", URL)):
+        try:
+            opened[label] = xr.open_dataset(u, engine="pydap")
+            print(f"  {label}: OK, {len(opened[label].variables)} variables")
+        except Exception as exc:
+            print(f"  {label}: FAILED  {type(exc).__name__}: {str(exc)[:110]}")
+    if "pl" not in opened:
+        print("\n  The pressure-level file cannot be opened at all. The build's")
+        print("  'No data found' is a swallowed fetch failure, not a level")
+        print("  selection problem — the recipe was never the issue.")
+        if "sfc" in opened:
+            print("  The surface file opens, so this is specific to that URL.")
+        return 2
+    print()
+
     print("=== 1. the pressure coordinate as xarray sees it\n")
-    ds = xr.open_dataset(URL, engine="pydap")
+    ds = opened["pl"]
     if "pressure" not in ds.coords and "pressure" not in ds.variables:
         print("  no `pressure` in coords or variables", file=sys.stderr)
         print(f"  coords: {list(ds.coords)}", file=sys.stderr)
