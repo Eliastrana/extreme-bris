@@ -82,7 +82,9 @@ else
     rm -rf "$MEPS"
   fi
   step "5/7  MEPS dataset — building (UNTESTED RECIPE, expect to iterate)"
-  "$DATA_ENV/bin/anemoi-datasets" create \
+  # Wrapped rather than called directly: 0.5.24's json_tidy cannot serialise
+  # the numpy integers MEPS carries in its coordinates. See the script.
+  "$DATA_ENV/bin/python" "$REPO_DIR/scripts/anemoi_create.py" \
       "$REPO_DIR/bris/configs/meps_2p5km.yaml" "$MEPS" 2>&1 | tee "$LOGS/meps-build.log"
   # A directory appearing is not a dataset. anemoi-datasets creates the zarr
   # before it fills it, so a failed build leaves a shell that `test -e` accepts
