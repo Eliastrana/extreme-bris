@@ -43,13 +43,27 @@ mkdir -p "$LOGS" "$OUT" logs
 step() { printf '\n\033[1m=== %s\033[0m\n' "$1"; }
 have() { [[ -e "$1" ]]; }
 
+# A directory existing is not a dataset. anemoi-datasets creates the zarr shell
+# before filling it, so an interrupted or failed build leaves something `test -e`
+# accepts and open_dataset rejects. Every decision about whether a dataset is
+# present has to go through this, not through `have`.
+dataset_ok() {
+  [[ -e "$1" ]] && "$DATA_ENV/bin/anemoi-datasets" inspect "$1" >/dev/null 2>&1
+}
+
 # --- state ------------------------------------------------------------------
 step "state"
 printf "  %-26s %s\n" "environment"  "$([[ -d $BRIS_ENV_DIR/.venv ]] && echo ok || echo MISSING)"
 printf "  %-26s %s\n" "data environment" "$([[ -d $DATA_ENV ]] && echo ok || echo MISSING)"
 printf "  %-26s %s\n" "checkpoint"   "$(have "$BRIS_CKPT" && echo ok || echo MISSING)"
-printf "  %-26s %s\n" "ERA5 (global)" "$(have "$ERA5" && echo ok || echo MISSING)"
-printf "  %-26s %s\n" "MEPS (LAM)"   "$(have "$MEPS" && echo ok || echo 'MISSING  <- the gate')"
+printf "  %-26s %s\n" "ERA5 (global)" "$(dataset_ok "$ERA5" && echo ok || echo MISSING)"
+if dataset_ok "$MEPS"; then
+  printf "  %-26s %s\n" "MEPS (LAM)" "ok"
+elif have "$MEPS"; then
+  printf "  %-26s %s\n" "MEPS (LAM)" "PARTIAL  <- failed build, will be removed"
+else
+  printf "  %-26s %s\n" "MEPS (LAM)" "MISSING  <- the gate"
+fi
 
 [[ "$CHECK_ONLY" -eq 1 ]] && exit 0
 
@@ -58,16 +72,20 @@ for req in "$BRIS_ENV_DIR/.venv" "$BRIS_CKPT" "$ERA5"; do
 done
 
 # --- 5. MEPS ----------------------------------------------------------------
-if have "$MEPS"; then
+if dataset_ok "$MEPS"; then
   step "5/7  MEPS dataset — already built"
 else
+  if have "$MEPS"; then
+    step "5/7  MEPS dataset — removing partial zarr from a failed build"
+    rm -rf "$MEPS"
+  fi
   step "5/7  MEPS dataset — building (UNTESTED RECIPE, expect to iterate)"
   "$DATA_ENV/bin/anemoi-datasets" create \
       "$REPO_DIR/bris/configs/meps_2p5km.yaml" "$MEPS" 2>&1 | tee "$LOGS/meps-build.log"
   # A directory appearing is not a dataset. anemoi-datasets creates the zarr
   # before it fills it, so a failed build leaves a shell that `test -e` accepts
   # and `open_dataset` then rejects with a bare AttributeError.
-  if ! "$DATA_ENV/bin/anemoi-datasets" inspect "$MEPS" >/dev/null 2>&1; then
+  if ! dataset_ok "$MEPS"; then
     echo
     echo "MEPS build failed. This is the expected stopping point today." >&2
     echo "The last 20 lines are the thing to work from:" >&2
