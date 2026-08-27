@@ -139,7 +139,7 @@ uv run bris \
   -sd "$DATE" \
   -ed "$DATE" \
   -l "$LEADTIMES" \
-  -wd "$OUT"
+  -wd "$OUTPUT_DIR"
 
 echo
 echo "=== finished in $((SECONDS - start))s"
