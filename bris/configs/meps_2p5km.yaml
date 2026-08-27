@@ -18,6 +18,14 @@
 #   * licence is NLOD / CC BY 4.0, no authentication
 #
 # Three traps, all of which produce output that runs and looks plausible:
+# EVERY physical conversion happens after the build, in
+# scripts/postprocess_meps.py, because every conversion filter in
+# anemoi-datasets 0.5.24 is GRIB-only: they all read
+# f.metadata(namespace="mars")["param"], and for xarray-sourced fields
+# _as_mars() returns {}. Only rename, transform and the no-ops work here.
+# So the recipe renames columns to their target names while they still hold the
+# source quantity, and the values are converted in place afterwards.
+#
 #   1. x_wind/y_wind are grid-relative and must be rotated to earth-relative.
 #      NOT DONE HERE: anemoi's rotate_winds filter reads
 #      f.metadata(namespace="mars")["param"], and for xarray-sourced fields
@@ -53,12 +61,6 @@ input:
               # Python, goes through requests, and honours REQUESTS_CA_BUNDLE.
               engine: pydap
 
-        # MEPS has no 2m dewpoint; derive it from relative humidity.
-        - single_level_relative_humidity_to_dewpoint:
-            t: air_temperature_2m
-            rh: relative_humidity_2m
-            td: 2d
-
         - rename:
             air_temperature_2m: 2t
             air_temperature_0m: skt
@@ -76,6 +78,8 @@ input:
             integral_of_surface_downwelling_longwave_flux_in_air_wrt_time: strd
             x_wind_10m: 10u
             y_wind_10m: 10v
+            # Holds RELATIVE HUMIDITY until postprocess_meps.py converts it.
+            relative_humidity_2m: 2d
 
     # ---- pressure levels ---------------------------------------------------
     - pipe:
@@ -88,19 +92,14 @@ input:
             # are `param` and `variable`.
             level: [50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000]
 
-        # m/s -> Pa/s. Needs temperature and the pressure coordinate; without
-        # this, w is wrong by roughly a factor of ten and has the wrong sign.
-        - wz_to_w:
-            wz: upward_air_velocity_pl
-            t: air_temperature_pl
-            w: w
-
         - rename:
             air_temperature_pl: t
             specific_humidity_pl: q
             geopotential_pl: z
             x_wind_pl: u
             y_wind_pl: v
+            # Holds m/s until postprocess_meps.py converts it to Pa/s.
+            upward_air_velocity_pl: w
 
 # TODO, in the order they will probably bite:
 #   * whether `2d` survives renaming, since the dewpoint filter names its output

@@ -74,6 +74,8 @@ done
 # --- 5. MEPS ----------------------------------------------------------------
 if dataset_ok "$MEPS"; then
   step "5/7  MEPS dataset — already built"
+  "$DATA_ENV/bin/python" "$REPO_DIR/scripts/postprocess_meps.py" "$MEPS" --dry-run \
+      >/dev/null 2>&1 || echo "  (already post-processed)"
 else
   if have "$MEPS"; then
     step "5/7  MEPS dataset — removing partial zarr from a failed build"
@@ -93,6 +95,14 @@ else
     [[ -e "$MEPS" ]] && echo "(removing the partial zarr at $MEPS)" >&2 && rm -rf "$MEPS"
     exit 2
   fi
+
+  # Every physical conversion happens here rather than in the recipe, because
+  # anemoi's conversion filters are GRIB-only. Skipping this leaves the dataset
+  # holding grid-relative winds, relative humidity in the 2d column and m/s in
+  # the w columns — all of which produce a forecast that runs and is wrong.
+  step "5b/7  physical conversions"
+  "$DATA_ENV/bin/python" "$REPO_DIR/scripts/postprocess_meps.py" "$MEPS" \
+      || { echo "post-processing failed — the dataset is NOT usable as it stands" >&2; exit 5; }
 fi
 
 # --- 6. verify the inputs before spending a GPU ------------------------------
