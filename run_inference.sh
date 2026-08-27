@@ -66,8 +66,12 @@ except Exception:
 # Openable AND holding what the checkpoint needs. A dataset can be perfectly
 # valid and still be missing a whole branch of the join, which is how a
 # 17-variable MEPS dataset survived a run and skipped its own rebuild.
+# 89 stored fields plus the 9 computed forcings, which have to be stored
+# variables here: the inference config selects all 98 by name.
+EXPECTED_VARS=98
+
 dataset_complete() {
-  dataset_ok "$1" && [[ "$(n_vars "$1")" == "89" ]]
+  dataset_ok "$1" && [[ "$(n_vars "$1")" == "$EXPECTED_VARS" ]]
 }
 
 # --- state ------------------------------------------------------------------
@@ -97,7 +101,7 @@ if dataset_complete "$MEPS"; then
       >/dev/null 2>&1 || echo "  (already post-processed)"
 else
   if have "$MEPS"; then
-    step "5/7  MEPS dataset — discarding incomplete build ($(n_vars "$MEPS") of 89 variables)"
+    step "5/7  MEPS dataset — discarding incomplete build ($(n_vars "$MEPS") of $EXPECTED_VARS variables)"
     rm -rf "$MEPS"
   fi
   step "5/7  MEPS dataset — building (UNTESTED RECIPE, expect to iterate)"
@@ -110,7 +114,7 @@ else
   # and `open_dataset` then rejects with a bare AttributeError.
   if ! dataset_complete "$MEPS"; then
     echo
-    echo "MEPS build produced $(n_vars "$MEPS") of 89 variables." >&2
+    echo "MEPS build produced $(n_vars "$MEPS") of $EXPECTED_VARS variables." >&2
     echo "MEPS build failed. This is the expected stopping point today." >&2
     echo "The last 20 lines are the thing to work from:" >&2
     tail -n 20 "$LOGS/meps-build.log" >&2
@@ -139,9 +143,9 @@ echo
 meps_vars=$(n_vars "$MEPS")
 era5_vars=$(n_vars "$ERA5")
 echo
-echo "  variables: MEPS ${meps_vars:-?}, ERA5 ${era5_vars:-?} (both must be 89)"
-if [[ "${meps_vars:-0}" != "89" || "${era5_vars:-0}" != "89" ]]; then
-  echo "  Variable count does not match the checkpoint's 89." >&2
+echo "  variables: MEPS ${meps_vars:-?}, ERA5 ${era5_vars:-?} (both must be $EXPECTED_VARS)"
+if [[ "${meps_vars:-0}" != "$EXPECTED_VARS" || "${era5_vars:-0}" != "$EXPECTED_VARS" ]]; then
+  echo "  Variable count does not match the checkpoint's $EXPECTED_VARS." >&2
   echo "  The cutout cannot be assembled from these. Stopping." >&2
   exit 6
 fi

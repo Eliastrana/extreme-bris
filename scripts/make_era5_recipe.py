@@ -111,6 +111,25 @@ def main() -> int:
         print("WARNING: pressure levels differ between variables; using the union",
               file=sys.stderr)
 
+    forcings_block = """    - forcings:
+        # The nine computed forcings. The model needs them as inputs, and the
+        # inference config selects them by name, so they must be stored
+        # variables in the dataset — hence KeyError: 'cos_julian_day' when they
+        # were absent. `template` supplies the grid only; the values depend on
+        # position and time alone.
+        template: ${input.join.0.mars}
+        param:
+          - cos_julian_day
+          - sin_julian_day
+          - cos_local_time
+          - sin_local_time
+          - cos_latitude
+          - sin_latitude
+          - cos_longitude
+          - sin_longitude
+          - insolation
+"""
+
     accum_block = ""
     if accum:
         accum_block = f"""    - accumulations:
@@ -198,7 +217,7 @@ input:
         levtype: pl
         level: {lev_set}
         param: {sorted(levels)}
-{accum_block}
+{accum_block}{forcings_block}
 output:
   statistics: valid_datetime
 """
