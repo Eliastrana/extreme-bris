@@ -60,6 +60,27 @@ input:
               # error even with the CA configured in ~/.dodsrc; pydap is pure
               # Python, goes through requests, and honours REQUESTS_CA_BUNDLE.
               engine: pydap
+            # Only the variables we map. Without this the source reads all
+            # 114 surface fields, and ones like icing_index carry an extra height
+            # dimension that collides on (valid_datetime, param, step).
+            variable:
+              - air_pressure_at_sea_level
+              - air_temperature_0m
+              - air_temperature_2m
+              - cloud_area_fraction
+              - high_type_cloud_area_fraction
+              - integral_of_surface_downwelling_longwave_flux_in_air_wrt_time
+              - integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time
+              - land_area_fraction
+              - low_type_cloud_area_fraction
+              - lwe_thickness_of_atmosphere_mass_content_of_water_vapor
+              - medium_type_cloud_area_fraction
+              - precipitation_amount_acc
+              - relative_humidity_2m
+              - surface_air_pressure
+              - surface_geopotential
+              - x_wind_10m
+              - y_wind_10m
 
         - rename:
             param:
@@ -88,6 +109,16 @@ input:
             url: https://thredds.met.no/thredds/dodsC/meps25epsarchive/{date:strftime(%Y)}/{date:strftime(%m)}/{date:strftime(%d)}/meps_det_pl_{date:strftime(%Y%m%d)}T{date:strftime(%H)}Z.ncml
             options:
               engine: pydap
+            # Only the variables we map. Without this the source reads all
+            # 114 surface fields, and ones like icing_index carry an extra height
+            # dimension that collides on (valid_datetime, param, step).
+            variable:
+              - air_temperature_pl
+              - geopotential_pl
+              - specific_humidity_pl
+              - upward_air_velocity_pl
+              - x_wind_pl
+              - y_wind_pl
             # MEPS carries 13 levels; the model wants 12. Documented behaviour:
             # for Xarray-based sources `level` and `levelist` are synonyms, as
             # are `param` and `variable`.
