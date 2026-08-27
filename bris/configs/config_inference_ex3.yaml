@@ -73,7 +73,7 @@ hardware:
   files:
     # SUBSTITUTED: ERA5 N320 in place of MET's aifs-od-an-oper-...-n320 MARS build.
     dataset_global: era5-n320-2025-6h-v1.zarr
-    dataset_lam: meps-2p5km-202501-202604-6h-v7.zarr
+    dataset_lam: meps-2p5km-2025-6h-v1.zarr
 
   num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
   num_gpus_per_model: 4           # model is sharded across 4 cards
