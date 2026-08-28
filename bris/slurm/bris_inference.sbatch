@@ -93,6 +93,8 @@ export ANEMOI_CONFIG_PATH="${ANEMOI_CONFIG_PATH:-$OUTPUT_DIR/.anemoi}"
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-32}"
 export HYDRA_FULL_ERROR=1
+# Reduces fragmentation, which the OOM message explicitly recommends.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 
 echo "=== node   : $(hostname)"

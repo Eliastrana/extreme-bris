@@ -50,6 +50,13 @@ checkpoints:
     static_forcings_dataset: null
     switch_graph: null
 
+# Chunking of the encoder and decoder attention blocks. bris reads this as
+# `inference_num_chunks` and sets ANEMOI_INFERENCE_NUM_CHUNKS; the default is 1,
+# which OOMs on a single 80 GB A100 — it asked for another 15.56 GiB with 8.93
+# free, inside the encoder mapper. Chunking trades speed for peak memory and
+# does not change the result. MET's training config uses 4.
+inference_num_chunks: 8
+
 timestep: 6h
 frequency: 6h
 workdir: ${output_path}
