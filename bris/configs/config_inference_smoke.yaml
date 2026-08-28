@@ -93,7 +93,12 @@ hardware:
     dataset_lam: meps-2p5km-2025-6h-v1.zarr
 
   num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
-  num_gpus_per_model: 1           # unsharded; MET used 4 on 64 GB cards
+  # Sharded across two cards. One 40 GB A100 is not enough: with chunking
+  # active the failure moved to attention_block's output accumulator,
+  #   out = torch.zeros((*query.shape[:-1], self.out_channels_conv))
+  # which is full-size regardless of num_chunks — 5.19 GiB with 528 MiB free.
+  # More chunks cannot help that allocation; splitting the model can.
+  num_gpus_per_model: 2
   num_members: 1                  # single member; no ensemble
   num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
 
