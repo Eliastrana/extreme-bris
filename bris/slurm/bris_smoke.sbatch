@@ -89,6 +89,18 @@ export ANEMOI_INFERENCE_NUM_CHUNKS="${BRIS_NUM_CHUNKS:-8}"
 # Makes OOM report the real allocation site rather than a cascade of retries.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
+# Lightning under Slurm requires one task per device. Asking for 4 GPUs with
+# --ntasks-per-node=1 fails deep inside the launcher with
+#   ValueError: You set `devices=4` ... does not match. HINT: Set `devices=1`.
+# which reads as a Lightning problem and is really a Slurm submission one.
+ntasks="${SLURM_NTASKS_PER_NODE:-${SLURM_NTASKS:-1}}"
+if [[ "$ntasks" != "$GPUS_PER_MODEL" ]]; then
+  echo "ERROR: --ntasks-per-node=$ntasks but $GPUS_PER_MODEL card(s) requested." >&2
+  echo "       They must match. Resubmit with:" >&2
+  echo "         sbatch --gres=gpu:...:$GPUS_PER_MODEL --ntasks-per-node=$GPUS_PER_MODEL ..." >&2
+  exit 7
+fi
+
 echo "=== node    : $(hostname)"
 echo "=== gpus    : $SLURM_GPUS_PER_NODE  (per-model: $GPUS_PER_MODEL, members: $MEMBERS)"
 echo "=== leadtimes: $LEADTIMES  (${DATE})"
