@@ -98,7 +98,9 @@ hardware:
   #   out = torch.zeros((*query.shape[:-1], self.out_channels_conv))
   # which is full-size regardless of num_chunks — 5.19 GiB with 528 MiB free.
   # More chunks cannot help that allocation; splitting the model can.
-  num_gpus_per_model: 2
+  # Settable from the job script, so the same config serves 1, 2 or 4 cards
+  # without editing the file — the partitions differ in how many are free.
+  num_gpus_per_model: ${oc.decode:${oc.env:BRIS_GPUS_PER_MODEL,2}}
   num_members: 1                  # single member; no ensemble
   num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
 
