@@ -15,17 +15,24 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-# name -> (min, max, unit, note)
+# The output uses CF standard names, not the ECMWF short names of the input.
+# Keying on 2t/msl/tp meant nothing was ever range-checked.
 RANGES = {
-    "2t":  (180.0, 340.0, "K", "surface air temperature"),
-    "msl": (87000.0, 110000.0, "Pa", "mean sea-level pressure"),
-    "tp":  (0.0, 0.5, "m", "total precipitation, must not be negative"),
-    "ws":  (0.0, 120.0, "m/s", "wind speed"),
-    "tcc": (0.0, 1.0, "-", "cloud fraction"),
-    "hcc": (0.0, 1.0, "-", "cloud fraction"),
-    "mcc": (0.0, 1.0, "-", "cloud fraction"),
-    "lcc": (0.0, 1.0, "-", "cloud fraction"),
+    "air_temperature_2m":        (180.0, 340.0, "K", "surface air temperature"),
+    "air_pressure_at_sea_level": (87000.0, 110000.0, "Pa", "mean sea-level pressure"),
+    "precipitation_amount":      (0.0, 500.0, "mm", "must not be negative"),
+    "wind_speed_10m":            (0.0, 120.0, "m/s", "wind speed"),
+    "altitude":                  (-500.0, 9000.0, "m", "orography"),
+    "cloud_area_fraction":       (0.0, 1.0, "-", "cloud fraction"),
 }
+
+# Coordinate reference and time-stamp variables. Constant by construction, so
+# flagging them as "constant field" is noise rather than a finding.
+METADATA_VARS = {"projection", "forecast_reference_time", "crs", "spatial_ref"}
+
+# Accumulated over the step, hence undefined at lead time 0. Expect exactly one
+# timestep of non-finite values — more than that is a real problem.
+ACCUMULATED_VARS = {"precipitation_amount", "integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time"}
 
 
 def main() -> int:
@@ -54,7 +61,11 @@ def main() -> int:
         print()
         print(f"  {'field':<8}{'min':>14}{'max':>14}{'mean':>14}   verdict")
 
+        n_times = int(ds.sizes.get("time", 1))
+
         for name, var in ds.data_vars.items():
+            if str(name) in METADATA_VARS:
+                continue
             vals = np.asarray(var.values, dtype="float64")
             finite = np.isfinite(vals)
             n_bad = int((~finite).sum())
@@ -66,7 +77,11 @@ def main() -> int:
             lo, hi, mean = float(np.nanmin(vals)), float(np.nanmax(vals)), float(np.nanmean(vals))
             notes = []
             if n_bad:
-                notes.append(f"{n_bad:,} non-finite")
+                per_step = vals.size // max(n_times, 1)
+                if str(name) in ACCUMULATED_VARS and n_bad == per_step:
+                    notes.append("first step undefined (accumulation) — expected")
+                else:
+                    notes.append(f"{n_bad:,} non-finite")
 
             spec = RANGES.get(str(name))
             if spec:
@@ -80,8 +95,11 @@ def main() -> int:
             if lo == hi:
                 notes.append("constant field")
 
+            # An expected note is not a failure.
+            benign = all("expected" in n for n in notes)
+
             verdict = "ok" if not notes else "; ".join(notes)
-            if notes:
+            if notes and not benign:
                 failures += 1
             print(f"  {name:<8}{lo:>14.4g}{hi:>14.4g}{mean:>14.4g}   {verdict}")
 
