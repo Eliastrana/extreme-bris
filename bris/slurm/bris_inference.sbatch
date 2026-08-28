@@ -130,7 +130,12 @@ for date in $BRIS_DATES; do
   echo ">> forecasting $date"
   start=$SECONDS
 
-  uv run bris \
+  # srun, not a bare call: sbatch runs this script once regardless of
+# --ntasks-per-node, so without it only one process starts and the other three
+# never join the distributed group — it waits 1801 seconds and dies with
+#   DistStoreError: Timed out ... 1/4 clients joined.
+# MET's own jobscripts use `srun uv run --locked bris` for the same reason.
+srun uv run bris \
     --config "$CONFIG" \
     -sd "$date" \
     -ed "$date" \

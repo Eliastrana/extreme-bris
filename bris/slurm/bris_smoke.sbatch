@@ -156,7 +156,12 @@ start=$SECONDS
 # bris takes a plain --config file and argparse flags — not Hydra overrides.
 # There is no flag for num_gpus_per_model or num_members, which is why the
 # smoke values live in their own config file.
-uv run bris \
+# srun, not a bare call: sbatch runs this script once regardless of
+# --ntasks-per-node, so without it only one process starts and the other three
+# never join the distributed group — it waits 1801 seconds and dies with
+#   DistStoreError: Timed out ... 1/4 clients joined.
+# MET's own jobscripts use `srun uv run --locked bris` for the same reason.
+srun uv run bris \
   --config "$CONFIG" \
   -sd "$DATE" \
   -ed "$DATE" \
