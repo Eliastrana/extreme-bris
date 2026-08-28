@@ -93,6 +93,13 @@ export ANEMOI_CONFIG_PATH="${ANEMOI_CONFIG_PATH:-$OUTPUT_DIR/.anemoi}"
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-32}"
 export HYDRA_FULL_ERROR=1
+# Chunking has to be exported BEFORE python starts. anemoi's block.py reads
+#   NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
+# at module level, i.e. at import time. bris sets the same variable inside
+# main(), long after anemoi has been imported, so the constant is already 1 and
+# the config's inference_num_chunks has no effect — the log still says
+# "chunked to 8" because bris prints its own value, not the model's.
+export ANEMOI_INFERENCE_NUM_CHUNKS="${BRIS_NUM_CHUNKS:-4}"
 # Reduces fragmentation, which the OOM message explicitly recommends.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TORCH_NCCL_ASYNC_ERROR_HANDLING=1
