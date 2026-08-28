@@ -72,6 +72,26 @@ def main() -> int:
         plt.close(fig)
         print(f"  wrote {out}")
 
+        # Wind direction against the pressure gradient. Speed alone cannot
+        # show a rotation error, since the magnitude is unchanged by one.
+        if {"10u", "10v"} <= set(ds.data_vars) and "air_pressure_at_sea_level" in ds.data_vars:
+            u = np.asarray(ds["10u"].isel(time=t).squeeze().values, dtype="float64")
+            v = np.asarray(ds["10v"].isel(time=t).squeeze().values, dtype="float64")
+            p_ = np.asarray(ds["air_pressure_at_sea_level"].isel(time=t).squeeze().values,
+                            dtype="float64")
+            gy, gx = np.gradient(p_)
+            # In the northern hemisphere geostrophic flow runs anticlockwise
+            # around low pressure, so wind should sit close to 90 degrees from
+            # the pressure gradient. A systematic offset from that is the
+            # signature of an unrotated or wrongly rotated wind field.
+            ang = np.degrees(np.arctan2(v, u) - np.arctan2(-gy, -gx))
+            ang = (ang + 180) % 360 - 180
+            ok = np.isfinite(ang) & np.isfinite(p_)
+            if ok.any():
+                med = float(np.median(ang[ok]))
+                print(f"  wind vs pressure gradient: median {med:+.1f} deg "
+                      f"(expect roughly +90 in the northern hemisphere)")
+
     print()
     print("What to look for:")
     print("  * a visible edge in the global plot where the MEPS domain sits —")
