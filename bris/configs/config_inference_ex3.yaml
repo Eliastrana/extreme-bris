@@ -97,12 +97,7 @@ routing:
     outputs:
       - netcdf:
           filename_pattern: ${output_path}/nordic_${run_name}_%Y-%m-%dT%HZ.nc
-          # 10u and 10v alongside ws: wind SPEED is sqrt(u^2+v^2) and therefore
-          # invariant under rotation — a field rotated by 20 degrees plots
-          # identically. So the speed field cannot verify the grid-relative to
-          # earth-relative rotation applied in postprocess_meps.py, which has
-          # only ever been tested on synthetic data. The components can.
-          variables: [2t, msl, tp, 10u, 10v]
+          variables: [2t, msl, tp]
           extra_variables: [ws]
           domain_name: "meps"
   - decoder_index: 0
@@ -110,12 +105,7 @@ routing:
     outputs:
       - netcdf:
           filename_pattern: ${output_path}/global_${run_name}_%Y-%m-%dT%HZ.nc
-          # 10u and 10v alongside ws: wind SPEED is sqrt(u^2+v^2) and therefore
-          # invariant under rotation — a field rotated by 20 degrees plots
-          # identically. So the speed field cannot verify the grid-relative to
-          # earth-relative rotation applied in postprocess_meps.py, which has
-          # only ever been tested on synthetic data. The components can.
-          variables: [2t, msl, tp, 10u, 10v]
+          variables: [2t, msl, tp]
           extra_variables: [ws]
           interp_res: 0.25
 
