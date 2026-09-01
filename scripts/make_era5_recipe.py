@@ -90,8 +90,15 @@ def main() -> int:
     ap.add_argument("--date", default="2025-04-01T00:00:00", help="initialisation time (t0)")
     ap.add_argument("--multistep", type=int, default=2, help="input states required")
     ap.add_argument("--frequency", default="6h")
-    ap.add_argument("-o", "--out", type=Path, default=Path("era5_n320.yaml"))
+    ap.add_argument("--source", choices=["era5", "od"], default="era5",
+                    help="era5: class ea via CDS (public, damped tails). "
+                         "od: IFS operational analysis via direct MARS - what "
+                         "Bris was actually trained on. Needs ~/.ecmwfapirc "
+                         "and a licence covering class od.")
+    ap.add_argument("-o", "--out", type=Path, default=None)
     args = ap.parse_args()
+    if args.out is None:
+        args.out = Path(f"{'od' if args.source == 'od' else 'era5'}_n320.yaml")
 
     meta = json.loads(args.metadata.read_text())
     fields = stored_fields(meta)
@@ -110,6 +117,82 @@ def main() -> int:
     if len({tuple(v) for v in levels.values()}) > 1:
         print("WARNING: pressure levels differ between variables; using the union",
               file=sys.stderr)
+
+    if args.source == "od":
+        # The real archive, reached through ~/.ecmwfapirc. No
+        # use_cdsapi_dataset - that key exists to route a MARS-shaped request
+        # at the CDS mirror when direct access is missing.
+        mars_note = """        # Direct MARS retrieval of the IFS operational analysis - the same
+        # class/stream/type Bris was trained on, so no substitution.
+        #
+        # N320 is a server-side interpolation: recent od cycles are native
+        # O1280 octahedral. That is what MET did too (the dataset they name is
+        # aifs-od-an-oper-...-n320), but confirm the returned grid has 542,080
+        # points before trusting a build - a silently regular grid will not
+        # match the checkpoint graph."""
+        mars_head = """        class: od
+        expver: "1"
+        stream: oper
+        type: an
+        grid: N320"""
+        # od accumulations come from the operational forecast stream. Its base
+        # times are 00/12, NOT the (6, 18) the accumulations source assumes for
+        # class ea - so this is the one block that does not carry over
+        # unchanged from the ERA5 recipe. Verify against a single retrieval
+        # before building the full archive.
+        accum_head = """        class: od
+        expver: "1"
+        stream: oper
+        grid: N320"""
+    else:
+        mars_note = """        # Routes this MARS-style request through the CDS API instead of
+        # requiring direct MARS access. era5-complete is the only ERA5 product
+        # that serves the native N320 grid; the standard CDS datasets return a
+        # regular 0.25 deg grid, which does not match the checkpoint's graph."""
+        mars_head = """        use_cdsapi_dataset: reanalysis-era5-complete
+        class: ea            # ERA5. Bris was trained on 'od'.
+        expver: "0001"
+        stream: oper
+        type: an
+        grid: N320"""
+        accum_head = """        use_cdsapi_dataset: reanalysis-era5-complete
+        class: ea
+        expver: "0001"
+        stream: oper
+        grid: N320"""
+
+    if args.source == "od":
+        ds_name = "od-an"
+        cred_note = """#   * direct MARS needs credentials in ~/.ecmwfapirc AND a licence that
+#     covers class od. Confirm with one tiny request (a single param, single
+#     level, single date) before submitting anything large: a request the
+#     licence does not cover can sit queued for hours before it is refused
+#   * ecmwf-api-client is NOT in the inference lockfile - build datasets in a
+#     separate environment, see docs/INPUTS.md"""
+        source_note = """#   * this is class od, type an - the operational analysis Bris was trained
+#     on. No substitution, so results from it may be compared with MET's
+#     published numbers
+#   * MARS is tape-organised by date/time. Retrieve all params and levels for
+#     one date in one request and loop dates outermost; a request that scatters
+#     across dates mounts tape repeatedly and is pathologically slow
+#   * the accumulations block assumes od forecast base times, which are NOT the
+#     (6, 18) the accumulations source applies for class ea. Verify tp/ssrd/strd
+#     against a known value before building an archive on top of it"""
+    else:
+        ds_name = "era5"
+        cred_note = """#   * ERA5 retrieval needs credentials in ~/.cdsapirc, and the licence must be
+#     accepted once through the CDS web form before the API will serve anything
+#   * cdsapi is NOT in the inference lockfile - build datasets in a separate
+#     environment, see docs/INPUTS.md"""
+        source_note = """#   * this is a MARS-style request (class: ea, grid: N320), which means
+#     `reanalysis-era5-complete` rather than the standard CDS ERA5 datasets.
+#     The standard ones return a regular 0.25 deg lat/lon grid, which does NOT
+#     match the checkpoint's graph - the global side must be native N320.
+#     era5-complete is API-only and served from tape, so expect hours to days
+#     even for two states. Submit early.
+#   * this substitutes ERA5 (class ea) for the operational analysis (class od)
+#     that Bris was trained on - see docs/INPUTS.md. ERA5 has damped tails;
+#     for extreme-weather work prefer --source od"""
 
     forcings_block = """    - forcings:
         # The nine computed forcings. The model needs them as inputs, and the
@@ -143,11 +226,7 @@ def main() -> int:
         # into the MARS request and is rejected there. No `type:` here either:
         # the source selects the forecast stream itself. For class ea it
         # applies data_accumulation_period=1 with base_times (6, 18).
-        use_cdsapi_dataset: reanalysis-era5-complete
-        class: ea
-        expver: "0001"
-        stream: oper
-        grid: N320
+{accum_head}
         levtype: sfc
         param: {accum}
         accumulation_period: {step_h}
@@ -163,26 +242,16 @@ def main() -> int:
 #     tutorial (metno/anemoi-regional-tutorial), which uses `level:` rather than
 #     MARS' `levelist:`. Still worth checking against the installed
 #     anemoi-datasets version
-#   * ERA5 retrieval needs credentials in ~/.cdsapirc, and the licence must be
-#     accepted once through the CDS web form before the API will serve anything
-#   * cdsapi is NOT in the inference lockfile — build datasets in a separate
-#     environment, see docs/INPUTS.md
+{cred_note}
 #   * `output.order_by` is deliberately omitted. Newer anemoi-datasets rejects
 #     it as deprecated; 0.5.24 defaults it to
 #     ['valid_datetime', 'param_level', 'number'], which is what newer versions
 #     hard-code. Omitting it behaves identically on both.
-#   * this is a MARS-style request (class: ea, grid: N320), which means
-#     `reanalysis-era5-complete` rather than the standard CDS ERA5 datasets.
-#     The standard ones return a regular 0.25 deg lat/lon grid, which does NOT
-#     match the checkpoint's graph — the global side must be native N320.
-#     era5-complete is API-only and served from tape, so expect hours to days
-#     even for two states. Submit early.
-#   * this substitutes ERA5 (class ea) for the operational analysis (class od)
-#     that Bris was trained on — see docs/INPUTS.md
+{source_note}
 #
 # Build with:
 #   cd $BRIS_ENV_DIR && uv run anemoi-datasets create <this file> \\
-#       $BRIS_DATA_DIR/era5-n320-{t0:%Y%m%d}-{args.frequency}-v1.zarr
+#       $BRIS_DATA_DIR/{ds_name}-n320-{t0:%Y%m%d}-{args.frequency}-v1.zarr
 
 dates:
   start: {start:%Y-%m-%dT%H:%M:%S}
@@ -195,25 +264,12 @@ dates:
 input:
   join:
     - mars:
-        # Routes this MARS-style request through the CDS API instead of
-        # requiring direct MARS access. era5-complete is the only ERA5 product
-        # that serves the native N320 grid; the standard CDS datasets return a
-        # regular 0.25 deg grid, which does not match the checkpoint's graph.
-        use_cdsapi_dataset: reanalysis-era5-complete
-        class: ea            # ERA5. Bris was trained on 'od'.
-        expver: "0001"
-        stream: oper
-        type: an
-        grid: N320
+{mars_note}
+{mars_head}
         levtype: sfc
         param: {surface}
     - mars:
-        use_cdsapi_dataset: reanalysis-era5-complete
-        class: ea
-        expver: "0001"
-        stream: oper
-        type: an
-        grid: N320
+{mars_head}
         levtype: pl
         level: {lev_set}
         param: {sorted(levels)}
