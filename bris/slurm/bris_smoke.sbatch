@@ -56,7 +56,11 @@ export BRIS_OUTPUT_DIR="$OUTPUT_DIR"
 GPUS_PER_MODEL="${BRIS_GPUS_PER_MODEL:-2}"
 export BRIS_GPUS_PER_MODEL="$GPUS_PER_MODEL"
 MEMBERS="${BRIS_MEMBERS:-1}"
+# Exported, not just passed as -l: the `-l` flag is accepted but does NOT
+# control how far the model is rolled out — checkpoints.forecaster.leadtimes in
+# the config does, and it now reads this variable.
 LEADTIMES="${BRIS_LEADTIMES:-2}"
+export BRIS_LEADTIMES="$LEADTIMES"
 DATE="${BRIS_DATE:-2025-04-01T00:00:00}"
 
 # shellcheck source=../../scripts/tls_env.sh
