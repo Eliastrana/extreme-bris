@@ -256,10 +256,23 @@ fi
 
 # --- 7. forecast ------------------------------------------------------------
 step "7/7  forecast"
-echo "  submitting bris_smoke.sbatch and waiting"
+
+# The placement that actually completed: 4 x V100 on dgx2q, model sharded over
+# all four. The sbatch file's own defaults (one A100 on hgx2q, GPUS_PER_MODEL=2)
+# trip its ntasks guard, because Lightning needs one task per device. Encode
+# what worked rather than leaving the caller to rediscover it.
+PARTITION="${BRIS_PARTITION:-dgx2q}"
+GRES="${BRIS_GRES:-gpu:tesla:4}"
+NTASKS="${BRIS_NTASKS:-4}"
+SHARD="${BRIS_GPUS_PER_MODEL:-4}"
+LEADTIMES="${BRIS_LEADTIMES:-10}"        # 10 x 6h = 60h
+
+echo "  $PARTITION  $GRES  ntasks=$NTASKS  shard=$SHARD  leadtimes=$LEADTIMES ($((LEADTIMES * 6))h)"
+echo "  submitting and waiting"
 sbatch --wait \
+  --partition="$PARTITION" --gres="$GRES" --ntasks-per-node="$NTASKS" \
   --output="$LOGS/forecast-%j.out" --error="$LOGS/forecast-%j.err" \
-  --export=ALL,BRIS_DATE="$DATE",BRIS_OUTPUT_DIR="$OUT" \
+  --export=ALL,BRIS_DATE="$DATE",BRIS_OUTPUT_DIR="$OUT",BRIS_GPUS_PER_MODEL="$SHARD",BRIS_LEADTIMES="$LEADTIMES" \
   "$REPO_DIR/bris/slurm/bris_smoke.sbatch"
 rc=$?
 
