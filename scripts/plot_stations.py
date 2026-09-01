@@ -41,6 +41,9 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bris_tls import ensure_ca_bundle, explain      # noqa: E402
+
 FROST = "https://frost.met.no"
 
 # A spread down the country: coastal west, inland east, mid, arctic. Their
@@ -69,7 +72,11 @@ def client_id() -> str:
 
 def frost_get(path: str, params: dict, cid: str) -> dict:
     import requests
-    r = requests.get(f"{FROST}/{path}", params=params, auth=(cid, ""), timeout=90)
+    try:
+        r = requests.get(f"{FROST}/{path}", params=params, auth=(cid, ""), timeout=90)
+    except Exception as exc:                         # noqa: BLE001
+        hint = explain(exc, "frost.met.no")
+        raise SystemExit(hint) from exc if hint else exc
     if r.status_code == 401:
         raise SystemExit("Frost rejected the client ID (401). Check it is the ID, "
                          "not the secret.")
@@ -142,6 +149,7 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
+    ensure_ca_bundle()
     cid = client_id()
     ds = xr.open_dataset(args.forecast)
 
@@ -152,8 +160,9 @@ def main() -> int:
 
     lat2d = np.asarray(ds["latitude"].values, dtype="float64")
     lon2d = np.asarray(ds["longitude"].values, dtype="float64")
-    times = [dt.datetime.utcfromtimestamp(t.astype("datetime64[s]").astype(int))
-             for t in ds["time"].values]
+    # .astype(object) on a second-resolution datetime64 yields a naive
+    # datetime directly - utcfromtimestamp is deprecated in 3.12.
+    times = [np.datetime64(t, "s").astype(object) for t in ds["time"].values]
     t0, t1 = times[0], times[-1]
 
     print(f"forecast : {args.forecast.name}")

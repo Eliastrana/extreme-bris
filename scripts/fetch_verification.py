@@ -46,36 +46,8 @@ INSTANT = [
 ]
 
 
-# eX3 intercepts TLS, so every HTTPS client needs the system CA bundle pointed
-# at explicitly. scripts/env.sh does that - but this script is easy to run from
-# a shell where it was never sourced, and the failure then is a wall of
-# SSLCertVerificationError that reads like a broken CDS rather than a missing
-# environment variable. That mistake has now cost time twice: once on the
-# OPeNDAP probes, where it was misread as a protocol problem for several
-# rounds. Handle it here rather than a third time.
-CA_CANDIDATES = (
-    "/etc/ssl/certs/ca-certificates.crt",
-    "/etc/pki/tls/certs/ca-bundle.crt",
-    "/etc/ssl/ca-bundle.pem",
-    "/etc/ssl/cert.pem",
-)
-
-
-def ensure_ca_bundle() -> None:
-    if os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("SSL_CERT_FILE"):
-        return
-    for c in CA_CANDIDATES:
-        if os.access(c, os.R_OK):
-            os.environ.setdefault("REQUESTS_CA_BUNDLE", c)
-            os.environ.setdefault("SSL_CERT_FILE", c)
-            os.environ.setdefault("CURL_CA_BUNDLE", c)
-            print(f"note: no CA bundle in the environment; using {c}")
-            print("      (sourcing scripts/env.sh does this properly)\n")
-            return
-    print("WARNING: no CA bundle found and none configured.", file=sys.stderr)
-    print("         On eX3 the request will fail TLS verification. Run:",
-          file=sys.stderr)
-    print("           source scripts/env.sh\n", file=sys.stderr)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from bris_tls import ensure_ca_bundle, explain      # noqa: E402
 
 
 def verification_times(t0: dt.datetime, leadtimes: int, step_h: int) -> list[dt.datetime]:
@@ -108,13 +80,9 @@ def retrieve(client, request: dict, target: Path) -> None:
             client.retrieve("reanalysis-era5-single-levels", req, str(target))
             return
         except Exception as exc:                     # noqa: BLE001
-            if "CERTIFICATE_VERIFY_FAILED" in str(exc) or "SSLError" in type(exc).__name__:
-                raise SystemExit(
-                    "\nTLS verification failed against CDS.\n"
-                    "This is eX3 intercepting HTTPS, not a problem with CDS or\n"
-                    "your credentials. Run:\n\n"
-                    "  source scripts/env.sh\n\n"
-                    "and try again from the same shell.\n") from exc
+            hint = explain(exc, "cds.climate.copernicus.eu")
+            if hint:
+                raise SystemExit(hint) from exc
             if key == "format":
                 raise
             low = str(exc).lower()
