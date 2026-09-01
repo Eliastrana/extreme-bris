@@ -122,7 +122,9 @@ def stage_identity(ECMWFService) -> bool:
             who = getattr(svc, attr, None)
             if who:
                 break
-        say(OK, f"MARS service reachable{f' as {who}' if who else ''}")
+        # Constructing the service resolves credentials locally. It says
+        # nothing about authorisation - that only shows up on the first call.
+        say(OK, f"credentials resolved{f' as {who}' if who else ''}")
         return True
     except Exception as exc:
         say(BAD, f"could not construct the MARS service: {exc}")
@@ -173,9 +175,15 @@ def retrieve(ECMWFService, req: dict, target: Path, timeout: int) -> tuple[str, 
         except Exception as exc:                      # noqa: BLE001
             text = f"{type(exc).__name__}: {exc}"
             low = text.lower()
-            denied = ("not authoris", "not author", "access denied", "forbidden",
-                      "no access", "permission", "licence", "license", "401", "403")
-            result["status"] = "refused" if any(d in low for d in denied) else "error"
+            # "has no access to services/mars" is the whole service being off,
+            # not this class being closed. The two need different advice, and
+            # retrying another class against the same service proves nothing.
+            if "no access to services" in low:
+                result["status"] = "no_service"
+            else:
+                denied = ("not authoris", "not author", "access denied", "forbidden",
+                          "no access", "permission", "licence", "license", "401", "403")
+                result["status"] = "refused" if any(d in low for d in denied) else "error"
             result["detail"] = text
 
     t = threading.Thread(target=worker, daemon=True)
@@ -221,6 +229,16 @@ def stage_retrieve(ECMWFService, args) -> str:
     if status == "ok" and target.exists() and target.stat().st_size > 0:
         say(OK, f"retrieved {target.stat().st_size:,} bytes -> {target}")
         return "ok"
+
+    if status == "no_service":
+        say(BAD, "the MARS service is not enabled for this account.")
+        for line in detail.splitlines()[:6]:
+            say(INFO, "    " + line)
+        say(INFO, "    Authentication succeeded - the server greeted you by name.")
+        say(INFO, "    What is missing is authorisation for the service itself,")
+        say(INFO, "    which is granted per account and is NOT implied by having")
+        say(INFO, "    an ECMWF login. No class will work until it is on.")
+        return "no_service"
 
     if status == "refused":
         say(BAD, "the request was refused.")
@@ -305,6 +323,34 @@ def stage_grid(path: Path) -> bool:
     return False
 
 
+def report_other_routes() -> None:
+    """What else is configured, so the next question is a precise one."""
+    say(INFO, "--- what this account has configured")
+
+    cds = Path.home() / ".cdsapirc"
+    if cds.exists():
+        say(OK, f"{cds} exists - the CDS route, which is how the ERA5 build")
+        say(INFO, "       actually worked. `class: ea` via use_cdsapi_dataset does")
+        say(INFO, "       NOT go through services/mars, so it is unaffected by this.")
+        say(INFO, "       Verify it independently:")
+        say(INFO, "         python3 scripts/test_cds_request.py")
+    else:
+        say(WARN, f"no {cds} - the ERA5 route is not configured on this host either.")
+
+    rc = Path.home() / ".ecmwfapirc"
+    if rc.exists():
+        say(OK, f"{rc} exists and authenticates, but carries no MARS role.")
+
+    say(INFO, "")
+    say(INFO, "    Three separate grants are easy to confuse, and 'MARS access'")
+    say(INFO, "    names only the first:")
+    say(INFO, "      1. services/mars on api.ecmwf.int  - the archive. NOT on.")
+    say(INFO, "      2. anemoi.ecmwf.int/datasets       - the training corpus.")
+    say(INFO, "      3. CDS / cds.climate.copernicus.eu - ERA5. Public.")
+    say(INFO, "    A grant of 2 does not enable 1. Worth establishing which")
+    say(INFO, "    arrived before rebuilding anything on the assumption of od.")
+
+
 # --- main -------------------------------------------------------------------
 
 def main() -> int:
@@ -369,8 +415,17 @@ def main() -> int:
         say(INFO, "         through.")
         return 3
 
-    # Refused or errored. Distinguish "no licence" from "broken harness" by
-    # running the identical request against a class we know is public.
+    if status == "no_service":
+        say(INFO, "VERDICT: the client, the credentials and the network are all")
+        say(INFO, "         fine - you were greeted by name. The MARS service is")
+        say(INFO, "         simply not enabled for this account, so no class is")
+        say(INFO, "         reachable through it and no retry will change that.")
+        print()
+        report_other_routes()
+        return 1
+
+    # A class-specific refusal, with the service itself reachable. Here a second
+    # class IS a meaningful control.
     if args.klass == "od":
         say(INFO, "--- fallback: same request against class ea, to tell a licence")
         say(INFO, "    problem apart from a broken client or network")
