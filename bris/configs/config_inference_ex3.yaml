@@ -36,7 +36,7 @@ end_date: 2025-04-01T00:00:00
 checkpoints:
   forecaster:
     checkpoint_path: ${model_path}/bris-forecaster/bris-crpsfft_inference.ckpt
-    leadtimes: 10                 # 10 x 6h = 60h forecast
+    leadtimes: 11                 # counts the analysis step: +0h .. +60h
     static_forcings_dataset: null
     switch_graph: null
 

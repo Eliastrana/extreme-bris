@@ -59,6 +59,7 @@ MEMBERS="${BRIS_MEMBERS:-1}"
 # Exported, not just passed as -l: the `-l` flag is accepted but does NOT
 # control how far the model is rolled out — checkpoints.forecaster.leadtimes in
 # the config does, and it now reads this variable.
+# Counts the analysis step: N gives +0h .. +(N-1)*6h. 11 is a 60 hour forecast.
 LEADTIMES="${BRIS_LEADTIMES:-2}"
 export BRIS_LEADTIMES="$LEADTIMES"
 DATE="${BRIS_DATE:-2025-04-01T00:00:00}"
@@ -165,8 +166,18 @@ start=$SECONDS
 # never join the distributed group — it waits 1801 seconds and dies with
 #   DistStoreError: Timed out ... 1/4 clients joined.
 # MET's own jobscripts use `srun uv run --locked bris` for the same reason.
+# bris validates the config against a JSON schema before OmegaConf resolves
+# interpolations, so `leadtimes` cannot be an ${oc.env:...} reference — it has
+# to be a literal. Write a per-run copy with the value substituted, next to the
+# output, so each run carries a record of exactly what it was given.
+mkdir -p "$OUTPUT_DIR"
+RUN_CONFIG="$OUTPUT_DIR/config-${SLURM_JOB_ID:-manual}.yaml"
+sed -e "s|^    leadtimes: .*|    leadtimes: $LEADTIMES|" "$CONFIG" > "$RUN_CONFIG"
+echo "=== config  : $RUN_CONFIG  (leadtimes -> $LEADTIMES)"
+grep -n "^    leadtimes:" "$RUN_CONFIG"
+
 srun uv run bris \
-  --config "$CONFIG" \
+  --config "$RUN_CONFIG" \
   -sd "$DATE" \
   -ed "$DATE" \
   -l "$LEADTIMES" \

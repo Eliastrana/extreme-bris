@@ -46,12 +46,18 @@ end_date: 2025-04-01T00:00:00
 checkpoints:
   forecaster:
     checkpoint_path: ${model_path}/bris-forecaster/bris-crpsfft_inference.ckpt
-    # THIS is what controls the rollout, not the `-l` flag the job script
-    # passes. Job 1377740 was submitted with BRIS_LEADTIMES=10, the script
-    # echoed "leadtimes: 10" and ran `bris ... -l 10`, and the output still had
-    # two steps — the same 40/45 MB as the 12h smoke test. The config wins.
-    # Read it from the environment, the way num_gpus_per_model already is.
-    leadtimes: ${oc.decode:${oc.env:BRIS_LEADTIMES,2}}
+    # This controls the rollout, NOT the `-l` flag the job script passes: job
+    # 1377740 ran with `-l 10` and still produced two steps.
+    #
+    # It must be a literal integer. bris validates the config file against a
+    # JSON schema BEFORE OmegaConf resolves anything, so ${oc.env:...} here
+    # fails with "is not of type 'integer'" (job 1377742) — unlike the hardware
+    # block, which is read after resolution. The job script therefore writes a
+    # per-run copy with this line substituted.
+    #
+    # COUNTS THE ANALYSIS STEP. The schema says "This includes the analysis
+    # leadtime", so N gives +0h .. +(N-1)*6h. 11 is 60 hours, not 10.
+    leadtimes: 2                  # smoke default; BRIS_LEADTIMES overrides
     static_forcings_dataset: null
     switch_graph: null
 
