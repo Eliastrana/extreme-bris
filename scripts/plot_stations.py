@@ -136,6 +136,10 @@ def main() -> int:
     ap.add_argument("--forecast", required=True, type=Path, help="nordic_*.nc")
     ap.add_argument("--stations", nargs="*", default=DEFAULT_STATIONS)
     ap.add_argument("-o", "--out", type=Path, default=Path("results/verify"))
+    ap.add_argument("--hours-before", type=int, default=24,
+                    help="hours of observations to show BEFORE t0, so the point "
+                         "where the model stops being told and starts predicting "
+                         "is visible (default 24; 0 to disable)")
     args = ap.parse_args()
 
     try:
@@ -189,7 +193,8 @@ def main() -> int:
         fc = ds[var].isel({ds[var].dims[-2]: j, ds[var].dims[-1]: i}).squeeze()
         fc_c = np.asarray(fc.values, dtype="float64") - 273.15
 
-        ot, ov = observations(sid, t0, t1, cid)
+        ot, ov = observations(sid, t0 - dt.timedelta(hours=args.hours_before),
+                              t1, cid)
         print(f"  {m['name']:<28} {d:5.1f} km from grid point, "
               f"{len(ov):3d} observations")
         panels.append((m, fc_c, ot, ov, d))
@@ -200,9 +205,29 @@ def main() -> int:
     fig, axes = plt.subplots(nrow, ncol, figsize=(7 * ncol, 3.6 * nrow),
                              squeeze=False, sharex=True)
     for ax, (m, fc_c, ot, ov, d) in zip(axes.ravel(), panels):
+        # Everything right of t0 the model produced on its own. Left of it is
+        # observation only - the model was never shown any of it. Making that
+        # boundary visible is the difference between "the blue line tracks the
+        # grey one" and "the blue line PREDICTED the grey one".
+        if args.hours_before > 0:
+            ax.axvspan(t0, t1, color="tab:blue", alpha=0.055, zorder=0)
+            ax.axvline(t0, color="0.35", ls="--", lw=1.1, zorder=1)
+
         if ov:
             ax.plot(ot, ov, "-", color="0.35", lw=1.4, label="observed (Frost)")
-        ax.plot(times, fc_c, "o-", color="tab:blue", lw=2, ms=5, label="Bris")
+        ax.plot(times, fc_c, "o-", color="tab:blue", lw=2, ms=5,
+                label="Bris forecast")
+        # The +0h value is the state the model was GIVEN, not something it
+        # worked out. Marking it keeps it from being read as a hit.
+        ax.plot([times[0]], [fc_c[0]], "o", ms=9, mfc="white",
+                mec="tab:blue", mew=2.2, zorder=5, label="initial state (t₀)")
+
+        if args.hours_before > 0:
+            ax.text(0.015, 0.965, "observed only", transform=ax.transAxes,
+                    fontsize=7.5, color="0.35", va="top", ha="left")
+            frac = 1 - (t1 - t0) / (t1 - (t0 - dt.timedelta(hours=args.hours_before)))
+            ax.text(frac + 0.02, 0.965, "→ forecast", transform=ax.transAxes,
+                    fontsize=7.5, color="tab:blue", va="top", ha="left")
         masl = f", {m['masl']:.0f} m" if m.get("masl") is not None else ""
         ax.set_title(f"{m['name']}{masl}   ({d:.1f} km to grid point)", fontsize=10)
         ax.set_ylabel("2 m temperature [°C]")
@@ -214,7 +239,8 @@ def main() -> int:
         ax.tick_params(axis="x", rotation=30)
 
     fig.suptitle(f"Bris vs observed 2 m temperature — initialised "
-                 f"{t0:%Y-%m-%d %HZ}, +0h to +{(len(times) - 1) * 6}h", y=1.0)
+                 f"{t0:%Y-%m-%d %HZ}, +0h to +{(len(times) - 1) * 6}h\n"
+                 f"shaded: the model saw nothing after t₀", y=1.02, fontsize=12)
     fig.tight_layout()
     args.out.mkdir(parents=True, exist_ok=True)
     p = args.out / f"stations_{t0:%Y%m%dT%H}Z.png"
@@ -222,6 +248,8 @@ def main() -> int:
     plt.close(fig)
 
     print(f"\nwrote {p}")
+    print("\nThe dashed line is t0. Everything right of it the model produced")
+    print("on its own, from two states and nothing else.")
     print("\nRead the shape, not the offset. A steady gap at one site is the")
     print("station sitting somewhere a 6 km^2 cell mean cannot represent.")
     print("A diurnal swing at the wrong time, or a front arriving hours late,")
