@@ -1,0 +1,217 @@
+{
+  "variable": "air_temperature_2m",
+  "unit": "\u00b0C",
+  "projection": "EPSG:3857",
+  "note": "Each layer's raster is uniform in Web Mercator y, not in latitude, and is placed by the four corners in `coordinates` ([lon, lat]: TL, TR, BR, BL). Draw them in the order given: the LAM belongs on top, where it covers the hole the cutout leaves in the global field.",
+  "vmin": -38.158,
+  "vmax": 25.768,
+  "colormap": "RdYlBu_r",
+  "legend": [
+    {
+      "value": -38.16,
+      "color": "#313695"
+    },
+    {
+      "value": -22.18,
+      "color": "#90c3dd"
+    },
+    {
+      "value": -6.19,
+      "color": "#fffebe"
+    },
+    {
+      "value": 9.79,
+      "color": "#f88c51"
+    },
+    {
+      "value": 25.77,
+      "color": "#a50026"
+    }
+  ],
+  "initialised": "2025-04-01T00:00:00Z",
+  "caveat": "Initialised from ERA5, not the operational analysis Bris was trained on. Not a skill estimate.",
+  "layers": [
+    {
+      "name": "global",
+      "coordinates": [
+        [
+          -60.0,
+          85.0
+        ],
+        [
+          60.0,
+          85.0
+        ],
+        [
+          60.0,
+          24.999999999999996
+        ],
+        [
+          -60.0,
+          24.999999999999996
+        ]
+      ],
+      "width": 1200,
+      "height": 1536,
+      "frames": [
+        {
+          "step": 0,
+          "lead_hours": 0,
+          "valid": "2025-04-01T00:00:00Z",
+          "image": "global_air_temperature_2m_00.png"
+        },
+        {
+          "step": 2,
+          "lead_hours": 12,
+          "valid": "2025-04-01T12:00:00Z",
+          "image": "global_air_temperature_2m_01.png"
+        },
+        {
+          "step": 4,
+          "lead_hours": 24,
+          "valid": "2025-04-02T00:00:00Z",
+          "image": "global_air_temperature_2m_02.png"
+        },
+        {
+          "step": 6,
+          "lead_hours": 36,
+          "valid": "2025-04-02T12:00:00Z",
+          "image": "global_air_temperature_2m_03.png"
+        },
+        {
+          "step": 8,
+          "lead_hours": 48,
+          "valid": "2025-04-03T00:00:00Z",
+          "image": "global_air_temperature_2m_04.png"
+        },
+        {
+          "step": 10,
+          "lead_hours": 60,
+          "valid": "2025-04-03T12:00:00Z",
+          "image": "global_air_temperature_2m_05.png"
+        },
+        {
+          "step": 12,
+          "lead_hours": 72,
+          "valid": "2025-04-04T00:00:00Z",
+          "image": "global_air_temperature_2m_06.png"
+        },
+        {
+          "step": 14,
+          "lead_hours": 84,
+          "valid": "2025-04-04T12:00:00Z",
+          "image": "global_air_temperature_2m_07.png"
+        },
+        {
+          "step": 16,
+          "lead_hours": 96,
+          "valid": "2025-04-05T00:00:00Z",
+          "image": "global_air_temperature_2m_08.png"
+        },
+        {
+          "step": 18,
+          "lead_hours": 108,
+          "valid": "2025-04-05T12:00:00Z",
+          "image": "global_air_temperature_2m_09.png"
+        },
+        {
+          "step": 20,
+          "lead_hours": 120,
+          "valid": "2025-04-06T00:00:00Z",
+          "image": "global_air_temperature_2m_10.png"
+        }
+      ]
+    },
+    {
+      "name": "nordic",
+      "coordinates": [
+        [
+          -13.150142049007059,
+          74.13089401049974
+        ],
+        [
+          49.418303307958986,
+          74.13089401049974
+        ],
+        [
+          49.418303307958986,
+          51.119235989348276
+        ],
+        [
+          -13.150142049007059,
+          51.119235989348276
+        ]
+      ],
+      "width": 983,
+      "height": 836,
+      "frames": [
+        {
+          "step": 0,
+          "lead_hours": 0,
+          "valid": "2025-04-01T00:00:00Z",
+          "image": "nordic_air_temperature_2m_00.png"
+        },
+        {
+          "step": 2,
+          "lead_hours": 12,
+          "valid": "2025-04-01T12:00:00Z",
+          "image": "nordic_air_temperature_2m_01.png"
+        },
+        {
+          "step": 4,
+          "lead_hours": 24,
+          "valid": "2025-04-02T00:00:00Z",
+          "image": "nordic_air_temperature_2m_02.png"
+        },
+        {
+          "step": 6,
+          "lead_hours": 36,
+          "valid": "2025-04-02T12:00:00Z",
+          "image": "nordic_air_temperature_2m_03.png"
+        },
+        {
+          "step": 8,
+          "lead_hours": 48,
+          "valid": "2025-04-03T00:00:00Z",
+          "image": "nordic_air_temperature_2m_04.png"
+        },
+        {
+          "step": 10,
+          "lead_hours": 60,
+          "valid": "2025-04-03T12:00:00Z",
+          "image": "nordic_air_temperature_2m_05.png"
+        },
+        {
+          "step": 12,
+          "lead_hours": 72,
+          "valid": "2025-04-04T00:00:00Z",
+          "image": "nordic_air_temperature_2m_06.png"
+        },
+        {
+          "step": 14,
+          "lead_hours": 84,
+          "valid": "2025-04-04T12:00:00Z",
+          "image": "nordic_air_temperature_2m_07.png"
+        },
+        {
+          "step": 16,
+          "lead_hours": 96,
+          "valid": "2025-04-05T00:00:00Z",
+          "image": "nordic_air_temperature_2m_08.png"
+        },
+        {
+          "step": 18,
+          "lead_hours": 108,
+          "valid": "2025-04-05T12:00:00Z",
+          "image": "nordic_air_temperature_2m_09.png"
+        },
+        {
+          "step": 20,
+          "lead_hours": 120,
+          "valid": "2025-04-06T00:00:00Z",
+          "image": "nordic_air_temperature_2m_10.png"
+        }
+      ]
+    }
+  ]
+}
