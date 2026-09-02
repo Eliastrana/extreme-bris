@@ -126,6 +126,13 @@ def main() -> int:
         lon0, lon1 = float(lon[keep].min()), float(lon[keep].max())
         lat0, lat1 = float(lat[keep].min()), float(lat[keep].max())
         y0, y1 = float(mercator_y(lat0, np)), float(mercator_y(lat1, np))
+        # mercator_y clamps short of the poles, where the projection diverges.
+        # The corners written to the manifest must be the latitudes the raster
+        # ACTUALLY spans, not the data's raw extremes: a global field reaching
+        # 90 degrees is drawn to 85.05, and reporting 90 would have Mapbox
+        # stretch the image between the wrong parallels and shift everything.
+        lat0 = float(np.degrees(2 * np.arctan(np.exp(y0)) - np.pi / 2))
+        lat1 = float(np.degrees(2 * np.arctan(np.exp(y1)) - np.pi / 2))
 
         # Do not ask for more pixels than there is data. Mercator stretches
         # rows apart towards the poles, so a width that looks fine from the
