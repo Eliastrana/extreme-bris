@@ -80,17 +80,21 @@ def main() -> int:
             p_ = np.asarray(ds["air_pressure_at_sea_level"].isel(time=t).squeeze().values,
                             dtype="float64")
             gy, gx = np.gradient(p_)
-            # In the northern hemisphere geostrophic flow runs anticlockwise
-            # around low pressure, so wind should sit close to 90 degrees from
-            # the pressure gradient. A systematic offset from that is the
-            # signature of an unrotated or wrongly rotated wind field.
+            # Angle from the down-gradient direction to the wind. With this
+            # convention a pure northern-hemisphere geostrophic field gives
+            # -90, NOT +90 — verified in check_rotation.py by constructing one
+            # and measuring it with this same formula. Reasoning the sign out
+            # instead of measuring it is how this line said +90 for weeks, and
+            # a correctly rotated field then reads as 165 degrees wrong.
+            # Friction turns 10 m wind toward low pressure by 10-20 degrees
+            # over sea and more over land, so expect -90 to -60.
             ang = np.degrees(np.arctan2(v, u) - np.arctan2(-gy, -gx))
             ang = (ang + 180) % 360 - 180
             ok = np.isfinite(ang) & np.isfinite(p_)
             if ok.any():
                 med = float(np.median(ang[ok]))
                 print(f"  wind vs pressure gradient: median {med:+.1f} deg "
-                      f"(expect roughly +90 in the northern hemisphere)")
+                      f"(expect -90 to -60; see scripts/check_rotation.py)")
 
     print()
     print("What to look for:")
