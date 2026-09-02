@@ -64,9 +64,13 @@ def main() -> int:
                          "and the LAM second: draw order follows this order, and "
                          "the colour scale is computed across all of them.")
     ap.add_argument("--bbox", default=None,
-                    help="west,south,east,north to crop to. Worth using on the "
+                    metavar="W,S,E,N",
+                    help="crop to west,south,east,north. Worth using on the "
                          "global file: a full-globe Mercator raster spends most "
-                         "of its pixels on ocean the map never shows.")
+                         "of its pixels on ocean the map never shows. Pass it "
+                         "with an equals sign when west is negative - "
+                         "--bbox=-60,25,60,85 - or argparse reads the leading "
+                         "minus as another flag.")
     ap.add_argument("--var", default="air_temperature_2m")
     ap.add_argument("--stride", type=int, default=1,
                     help="export every Nth timestep (default 1)")
