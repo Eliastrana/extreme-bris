@@ -252,6 +252,46 @@ def main() -> int:
                        "W": W, "H": H, "lon0": lon0, "lon1": lon1,
                        "lat0": lat0, "lat1": lat1})
 
+    # --- fill upper layers' gaps from the layer beneath -----------------------
+    # The LAM raster is a rotated quadrilateral inside a lat/lon bounding box,
+    # so its corners hold no data. That is fine in Mercator, where the renderer
+    # honours the alpha channel - but Mapbox's globe view draws an image source
+    # as its full bounding rectangle and discards the transparency, turning the
+    # Lambert domain into a square.
+    #
+    # Filling those corners from the global field underneath makes the raster
+    # opaque everywhere, so there is no transparency left to lose and the globe
+    # renders it correctly. Both layers keep their own resolution; the
+    # alternative - compositing everything into one raster - would have thrown
+    # away the 2.5 km detail that is the whole reason for having a LAM.
+    if len(layers) > 1:
+        base = layers[0]
+        by0 = float(mercator_y(base["lat0"], np))
+        by1 = float(mercator_y(base["lat1"], np))
+        for up in layers[1:]:
+            uy0 = float(mercator_y(up["lat0"], np))
+            uy1 = float(mercator_y(up["lat1"], np))
+            uy = uy0 + ((up["H"] - 1 - np.arange(up["H"])) /
+                        max(up["H"] - 1, 1)) * (uy1 - uy0)
+            ux = up["lon0"] + (np.arange(up["W"]) / max(up["W"] - 1, 1)) * \
+                (up["lon1"] - up["lon0"])
+            j = np.clip(np.round((base["H"] - 1) -
+                                 (uy - by0) / (by1 - by0) * (base["H"] - 1)),
+                        0, base["H"] - 1).astype(int)
+            i = np.clip(np.round((ux - base["lon0"]) /
+                                 (base["lon1"] - base["lon0"]) * (base["W"] - 1)),
+                        0, base["W"] - 1).astype(int)
+            filled = 0
+            for k in range(len(up["grids"])):
+                hole = ~np.isfinite(up["grids"][k])
+                if not hole.any():
+                    continue
+                under = base["grids"][k][np.ix_(j, i)]
+                up["grids"][k] = np.where(hole, under, up["grids"][k])
+                filled += int(hole.sum())
+            print(f"    filled {filled // max(len(up['grids']), 1):,} px/frame of "
+                  f"{up['name']} from {base['name']}, so the globe view keeps its shape")
+
     # Time axes have to agree, or the slider shows one domain at one hour and
     # the other at another without saying so.
     lead_sets = {tuple(l["steps"]) for l in layers}
