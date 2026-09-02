@@ -59,7 +59,14 @@ def mercator_y(lat_deg, np):
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--forecast", required=True, type=Path, help="nordic_*.nc")
+    ap.add_argument("--forecast", required=True, type=Path, nargs="+",
+                    help="one or more NetCDF files. Give the global one first "
+                         "and the LAM second: draw order follows this order, and "
+                         "the colour scale is computed across all of them.")
+    ap.add_argument("--bbox", default=None,
+                    help="west,south,east,north to crop to. Worth using on the "
+                         "global file: a full-globe Mercator raster spends most "
+                         "of its pixels on ocean the map never shows.")
     ap.add_argument("--var", default="air_temperature_2m")
     ap.add_argument("--stride", type=int, default=1,
                     help="export every Nth timestep (default 1)")
@@ -81,104 +88,205 @@ def main() -> int:
         print(f"ERROR: {exc.name} missing - run inside the Bris environment.",
               file=sys.stderr)
         return 1
+    convert, unit, cmap_name = CONVERT.get(args.var, (lambda a: a, "", "viridis"))
 
-    ds = xr.open_dataset(args.forecast)
-    if args.var not in ds:
-        print(f"ERROR: {args.var} not in {args.forecast.name}", file=sys.stderr)
-        print(f"  have: {', '.join(list(ds.data_vars)[:12])}", file=sys.stderr)
+    bbox = None
+    if args.bbox:
+        w, s_, e, n = (float(x) for x in args.bbox.split(","))
+        bbox = (w, s_, e, n)
+
+    # --- resample each input, sharing nothing yet but the geometry ----------
+    layers = []
+    for path in args.forecast:
+        ds = xr.open_dataset(path)
+        if args.var not in ds:
+            print(f"ERROR: {args.var} not in {path.name}", file=sys.stderr)
+            print(f"  have: {', '.join(list(ds.data_vars)[:12])}", file=sys.stderr)
+            return 1
+
+        lat_v = np.asarray(ds["latitude"].values, dtype="float64")
+        lon_v = np.asarray(ds["longitude"].values, dtype="float64")
+        # The LAM file carries 2D Lambert coordinates; the global one is a
+        # regular lat/lon grid with 1D axes. Mesh the second so both are
+        # per-cell and the rest of the code needs no special case.
+        regular = lat_v.ndim == 1 and lon_v.ndim == 1
+        axes = (lat_v.copy(), lon_v.copy()) if regular else None
+        if regular:
+            lat_v, lon_v = np.meshgrid(lat_v, lon_v, indexing="ij")
+        lat, lon = lat_v.ravel(), lon_v.ravel()
+
+        keep = np.ones(lat.shape, dtype=bool)
+        if bbox:
+            w, s_, e, n = bbox
+            keep = (lon >= w) & (lon <= e) & (lat >= s_) & (lat <= n)
+            if not keep.any():
+                print(f"ERROR: --bbox excludes all of {path.name}", file=sys.stderr)
+                return 1
+
+        lon0, lon1 = float(lon[keep].min()), float(lon[keep].max())
+        lat0, lat1 = float(lat[keep].min()), float(lat[keep].max())
+        y0, y1 = float(mercator_y(lat0, np)), float(mercator_y(lat1, np))
+
+        # Do not ask for more pixels than there is data. Mercator stretches
+        # rows apart towards the poles, so a width that looks fine from the
+        # source's column count leaves horizontal gaps at high latitude - the
+        # global field is the one this bites. Cap so the target holds roughly
+        # one source cell per pixel, given the aspect the projection forces.
+        aspect = (y1 - y0) / np.deg2rad(lon1 - lon0)
+        if regular:
+            # Inverse sampling has no gaps by construction, so resolution is
+            # only a question of file size.
+            w_default = min(1200, max(400, ds[args.var].shape[-1]))
+        else:
+            # Forward scatter must not be asked for more pixels than it has
+            # cells to fill them with.
+            n_src = int(keep.sum())
+            w_default = max(240, min(1400, int(np.sqrt(max(n_src, 1) / max(aspect, 1e-6)))))
+        W = args.width if args.width > 0 else w_default
+        H = max(1, int(round(W * aspect)))
+
+        px = ((lon - lon0) / (lon1 - lon0) * (W - 1)).round().astype("int64")
+        py = ((mercator_y(lat, np) - y0) / (y1 - y0) * (H - 1)).round().astype("int64")
+        py = (H - 1) - py
+        np.clip(px, 0, W - 1, out=px)
+        np.clip(py, 0, H - 1, out=py)
+        flat = py * W + px
+
+        times = [np.datetime64(t, "s").astype(object) for t in ds["time"].values]
+        steps = list(range(0, len(times), args.stride))
+        name = "nordic" if "nordic" in path.name else (
+            "global" if "global" in path.name else path.stem)
+
+        print(f"--- {name}: {path.name}")
+        print(f"    {lat.size:,} cells -> {W} x {H} Mercator")
+        print(f"    {lat0:.2f}..{lat1:.2f} N, {lon0:.2f}..{lon1:.2f} E, "
+              f"{len(steps)} steps")
+
+        # Two resampling paths, because one algorithm cannot serve both.
+        #
+        # A REGULAR lat/lon source is sampled INVERSELY: every target pixel
+        # computes its own lat/lon and looks the source up. Forward scatter
+        # fails badly here - Mercator packs target rows into ever smaller
+        # latitude increments towards the pole, so above roughly 70N most rows
+        # fall between two source rows and stay empty. The raster comes out
+        # barred, and no amount of hole filling repairs whole missing rows.
+        # The arithmetic is unforgiving: at 85N a 0.25 degree source supports
+        # about fifty Mercator rows before gaps appear.
+        #
+        # The CURVILINEAR Lambert source keeps forward scatter, which is right
+        # there: the target is coarser than the source, there is no analytic
+        # inverse, and every target pixel receives several source cells.
+        inv = None
+        if regular:
+            src_lat, src_lon = axes
+            yy = y0 + ((H - 1 - np.arange(H)) / max(H - 1, 1)) * (y1 - y0)
+            tgt_lat = np.degrees(2 * np.arctan(np.exp(yy)) - np.pi / 2)
+            tgt_lon = lon0 + (np.arange(W) / max(W - 1, 1)) * (lon1 - lon0)
+            j_idx = np.abs(src_lat[None, :] - tgt_lat[:, None]).argmin(axis=1)
+            i_idx = np.abs(src_lon[None, :] - tgt_lon[:, None]).argmin(axis=1)
+            inv = (j_idx, i_idx)
+
+        grids = []
+        for k in steps:
+            raw = np.asarray(ds[args.var].isel(time=k).squeeze().values,
+                             dtype="float64")
+            if inv is not None:
+                img = convert(raw[np.ix_(inv[0], inv[1])])
+                if bbox:
+                    outside = ((tgt_lon[None, :] < bbox[0]) |
+                               (tgt_lon[None, :] > bbox[2]) |
+                               (tgt_lat[:, None] < bbox[1]) |
+                               (tgt_lat[:, None] > bbox[3]))
+                    img = np.where(outside, np.nan, img)
+                grids.append(img)
+                continue
+            vals = convert(raw.ravel())
+            total = np.zeros(W * H)
+            count = np.zeros(W * H)
+            good = np.isfinite(vals) & keep
+            np.add.at(total, flat[good], vals[good])
+            np.add.at(count, flat[good], 1.0)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                img = np.where(count > 0, total / np.maximum(count, 1), np.nan)
+            img = img.reshape(H, W)
+            # One pass closing single-pixel holes from the scatter. Only pixels
+            # with at least three filled neighbours, so the domain edge is not
+            # painted over and no region is invented.
+            # Close the gaps the scatter leaves. Two passes at two neighbours,
+            # not one pass at three: Mercator stretches rows apart towards the
+            # poles, so the gaps arrive as whole empty ROWS. A pixel in an empty
+            # row has exactly two filled neighbours - the one above and the one
+            # below - so a three-neighbour rule can never close a stripe, which
+            # is why the global field came out barred.
+            for _ in range(2):
+                hole = ~np.isfinite(img)
+                if not hole.any():
+                    break
+                pad = np.pad(np.nan_to_num(img, nan=0.0), 1)
+                cnt = np.pad(np.isfinite(img).astype(float), 1)
+                tot = (pad[:-2, 1:-1] + pad[2:, 1:-1] + pad[1:-1, :-2] + pad[1:-1, 2:])
+                num = (cnt[:-2, 1:-1] + cnt[2:, 1:-1] + cnt[1:-1, :-2] + cnt[1:-1, 2:])
+                # Two is enough to interpolate between; one would smear the
+                # domain edge outwards into empty space.
+                img = np.where(hole & (num >= 2), tot / np.maximum(num, 1), img)
+            grids.append(img)
+
+        cover = float(np.isfinite(grids[0]).mean())
+        if cover < 0.35:
+            print(f"    WARNING: only {cover * 100:.0f}% of the raster has data. "
+                  f"That is either a\n             genuine gap in the field - the "
+                  f"cutout leaves one - or the target is\n             finer than "
+                  f"the source. Compare against the domain shape before trusting it.")
+        layers.append({"name": name, "grids": grids, "steps": steps, "times": times,
+                       "W": W, "H": H, "lon0": lon0, "lon1": lon1,
+                       "lat0": lat0, "lat1": lat1})
+
+    # Time axes have to agree, or the slider shows one domain at one hour and
+    # the other at another without saying so.
+    lead_sets = {tuple(l["steps"]) for l in layers}
+    if len(lead_sets) > 1:
+        print("ERROR: the inputs do not share a timestep list.", file=sys.stderr)
         return 1
 
-    convert, unit, cmap_name = CONVERT.get(args.var, (lambda a: a, "", "viridis"))
-    lat = np.asarray(ds["latitude"].values, dtype="float64").ravel()
-    lon = np.asarray(ds["longitude"].values, dtype="float64").ravel()
-    times = [np.datetime64(t, "s").astype(object) for t in ds["time"].values]
-    steps = list(range(0, len(times), args.stride))
-
-    # --- target raster, uniform in Mercator ----------------------------------
-    lon0, lon1 = float(lon.min()), float(lon.max())
-    lat0, lat1 = float(lat.min()), float(lat.max())
-    y0, y1 = float(mercator_y(lat0, np)), float(mercator_y(lat1, np))
-    # A target finer than the source leaves holes: forward scatter fills the
-    # pixel a source cell lands in and nothing between. Follow the source grid
-    # unless told otherwise.
-    src_nx = ds[args.var].shape[-1]
-    W = args.width if args.width > 0 else min(1400, max(300, src_nx))
-    # keep pixels square in Mercator space
-    H = max(1, int(round(W * (y1 - y0) / np.deg2rad(lon1 - lon0))))
-
-    px = ((lon - lon0) / (lon1 - lon0) * (W - 1)).round().astype("int64")
-    py = ((mercator_y(lat, np) - y0) / (y1 - y0) * (H - 1)).round().astype("int64")
-    py = (H - 1) - py                      # image rows run north to south
-    np.clip(px, 0, W - 1, out=px)
-    np.clip(py, 0, H - 1, out=py)
-    flat = py * W + px
-
-    print(f"field    : {args.var}  [{unit}]")
-    print(f"source   : {lat.size:,} points, Lambert 2D lat/lon")
-    print(f"target   : {W} x {H} Web Mercator")
-    print(f"bounds   : {lat0:.3f}..{lat1:.3f} N, {lon0:.3f}..{lon1:.3f} E")
-    print(f"steps    : {len(steps)} of {len(times)} (stride {args.stride})\n")
-
-    # --- one pass to fix the colour scale across every exported step ---------
-    frames = []
-    for k in steps:
-        vals = convert(np.asarray(ds[args.var].isel(time=k).squeeze().values,
-                                  dtype="float64").ravel())
-        total = np.zeros(W * H)
-        count = np.zeros(W * H)
-        good = np.isfinite(vals)
-        np.add.at(total, flat[good], vals[good])
-        np.add.at(count, flat[good], 1.0)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            img = np.where(count > 0, total / np.maximum(count, 1), np.nan)
-        img = img.reshape(H, W)
-        # One pass closing single-pixel holes from the scatter. Only pixels with
-        # at least three filled neighbours are filled, so this smooths the sieve
-        # without painting over the domain edge or inventing a region.
-        hole = ~np.isfinite(img)
-        if hole.any():
-            pad = np.pad(np.nan_to_num(img, nan=0.0), 1)
-            cnt = np.pad(np.isfinite(img).astype(float), 1)
-            tot = (pad[:-2, 1:-1] + pad[2:, 1:-1] + pad[1:-1, :-2] + pad[1:-1, 2:])
-            num = (cnt[:-2, 1:-1] + cnt[2:, 1:-1] + cnt[1:-1, :-2] + cnt[1:-1, 2:])
-            fill = hole & (num >= 3)
-            img = np.where(fill, tot / np.maximum(num, 1), img)
-        frames.append(img)
-
-    cover0 = float(np.isfinite(frames[0]).mean())
-    if cover0 < 0.55:
-        print(f"WARNING: only {cover0 * 100:.0f}% of the raster has data. The "
-              f"target is finer than\n         the source grid - lower --width.")
-    stack = np.concatenate([f[np.isfinite(f)].ravel() for f in frames])
-    vmin, vmax = (float(np.percentile(stack, 1)), float(np.percentile(stack, 99)))
+    # --- ONE colour scale across every layer and every step ------------------
+    # Scaling each domain to its own range puts a colour jump on the seam that
+    # is not in the data - the LAM would read as systematically warmer or colder
+    # than the global field it sits inside.
+    stack = np.concatenate([g[np.isfinite(g)].ravel()
+                            for l in layers for g in l["grids"]])
+    vmin, vmax = float(np.percentile(stack, 1)), float(np.percentile(stack, 99))
     if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax - vmin < 1e-9:
-        # A constant field would divide by zero in the normalisation and every
-        # pixel would come out the same colour, which reads as a working export.
         lo, hi = float(np.nanmin(stack)), float(np.nanmax(stack))
         pad = max(abs(hi) * 1e-3, 0.5)
         vmin, vmax = lo - pad, hi + pad
-        print(f"WARNING: the 1st and 99th percentiles are equal - the field is "
-              f"near-constant.\n         Widened to {vmin:.3f}..{vmax:.3f} so the "
-              f"image is not a single flat colour.")
-    print(f"colour   : {cmap_name}, {vmin:.2f} .. {vmax:.2f} {unit} "
-          f"(1st/99th percentile over all exported steps)\n")
+        print(f"WARNING: percentiles equal - field is near-constant. Widened to "
+              f"{vmin:.3f}..{vmax:.3f}.")
+    print(f"\nshared colour scale: {cmap_name}, {vmin:.2f} .. {vmax:.2f} {unit}\n")
 
     norm = colors.Normalize(vmin=vmin, vmax=vmax)
-    cmap = cm.get_cmap(cmap_name) if hasattr(cm, "get_cmap") else matplotlib.colormaps[cmap_name]
-
+    cmap = matplotlib.colormaps[cmap_name]
     args.out.mkdir(parents=True, exist_ok=True)
-    entries = []
-    for n, (k, img) in enumerate(zip(steps, frames)):
-        rgba = cmap(norm(img))
-        rgba[..., 3] = np.where(np.isfinite(img), 1.0, 0.0)   # holes stay clear
-        name = f"{args.var}_{n:02d}.png"
-        imsave(args.out / name, rgba)
-        cover = float(np.isfinite(img).mean())
-        entries.append({"step": k, "lead_hours": k * 6,
-                        "valid": times[k].strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "image": name})
-        print(f"  +{k * 6:3d}h  {name}  ({cover * 100:.0f}% covered, "
-              f"{(args.out / name).stat().st_size / 1024:.0f} KB)")
+
+    out_layers = []
+    for l in layers:
+        entries = []
+        for n, (k, img) in enumerate(zip(l["steps"], l["grids"])):
+            rgba = cmap(norm(img))
+            rgba[..., 3] = np.where(np.isfinite(img), 1.0, 0.0)
+            fname = f"{l['name']}_{args.var}_{n:02d}.png"
+            imsave(args.out / fname, rgba)
+            entries.append({"step": k, "lead_hours": k * 6,
+                            "valid": l["times"][k].strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "image": fname})
+        kb = sum((args.out / e["image"]).stat().st_size for e in entries) / 1024
+        print(f"  {l['name']:8s} {len(entries):3d} frames, {kb:6.0f} KB")
+        out_layers.append({
+            "name": l["name"],
+            "coordinates": [[l["lon0"], l["lat1"]], [l["lon1"], l["lat1"]],
+                            [l["lon1"], l["lat0"]], [l["lon0"], l["lat0"]]],
+            "width": l["W"], "height": l["H"],
+            "frames": entries,
+        })
 
     swatches = [{"value": round(float(vmin + (vmax - vmin) * f), 2),
                  "color": colors.to_hex(cmap(norm(vmin + (vmax - vmin) * f)))}
@@ -188,25 +296,21 @@ def main() -> int:
         "variable": args.var,
         "unit": unit,
         "projection": "EPSG:3857",
-        "note": ("Raster is uniform in Web Mercator y, not in latitude. Place it "
-                 "as a Mapbox image source using `coordinates` below, which are "
-                 "the corners in [lon, lat] order: TL, TR, BR, BL."),
-        "coordinates": [[lon0, lat1], [lon1, lat1], [lon1, lat0], [lon0, lat0]],
-        "bounds": {"west": lon0, "east": lon1, "south": lat0, "north": lat1},
-        "width": W, "height": H,
+        "note": ("Each layer's raster is uniform in Web Mercator y, not in "
+                 "latitude, and is placed by the four corners in `coordinates` "
+                 "([lon, lat]: TL, TR, BR, BL). Draw them in the order given: "
+                 "the LAM belongs on top, where it covers the hole the cutout "
+                 "leaves in the global field."),
         "vmin": round(vmin, 3), "vmax": round(vmax, 3),
         "colormap": cmap_name,
         "legend": swatches,
-        "initialised": times[0].strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": args.forecast.name,
+        "initialised": layers[0]["times"][0].strftime("%Y-%m-%dT%H:%M:%SZ"),
         "caveat": ("Initialised from ERA5, not the operational analysis Bris was "
                    "trained on. Not a skill estimate."),
-        "frames": entries,
+        "layers": out_layers,
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2))
-    total_kb = sum((args.out / e["image"]).stat().st_size for e in entries) / 1024
     print(f"\nwrote {args.out}/manifest.json")
-    print(f"total {total_kb:.0f} KB across {len(entries)} frames")
     return 0
 
 
