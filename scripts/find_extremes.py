@@ -190,6 +190,7 @@ def main() -> int:
         key=lambda kv: max(h[2] for h in kv[1]), reverse=True)
 
     name = {s["id"]: s["name"] for s in stations}
+    coord = {s["id"]: (s["lat"], s["lon"]) for s in stations}
     # MEPS keeps the 00/06/12/18 cycles past 16 months; the combined
     # meps_det_2_5km files are the ones dropped after 30 days. So this marks
     # what the docs SAY is recoverable - to be confirmed when the archive is up.
@@ -219,14 +220,16 @@ def main() -> int:
         "widespread": [
             {"date": d, "stations": len(h),
              "max_ratio": round(max(x[2] for x in h), 2),
-             "sites": [{"id": s, "name": name.get(s, s), "mm": round(v, 1),
-                        "ratio": round(r, 2)}
+             "sites": [{"id": s, "name": name.get(s, s),
+                        "lat": coord[s][0], "lon": coord[s][1],
+                        "mm": round(v, 1), "ratio": round(r, 2)}
                        for s, v, r in sorted(h, key=lambda x: -x[2])[:8]]}
             for d, h in widespread[:args.top]],
         "local": [
             {"date": d, "max_ratio": round(max(x[2] for x in h), 2),
-             "sites": [{"id": s, "name": name.get(s, s), "mm": round(v, 1),
-                        "ratio": round(r, 2)} for s, v, r in h]}
+             "sites": [{"id": s, "name": name.get(s, s),
+                        "lat": coord[s][0], "lon": coord[s][1],
+                        "mm": round(v, 1), "ratio": round(r, 2)} for s, v, r in h]}
             for d, h in local[:args.top]],
     }
     (args.out / "candidates.json").write_text(json.dumps(payload, indent=2))
