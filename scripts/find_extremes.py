@@ -42,7 +42,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bris_tls import ensure_ca_bundle                    # noqa: E402
 from plot_stations import client_id, frost_get           # noqa: E402
-from check_smoothing import norwegian_stations           # noqa: E402
 
 ELEMENT = "sum(precipitation_amount P1D)"
 BATCH = 25          # stations per request; a decade of days is a lot of rows
@@ -109,14 +108,38 @@ def main() -> int:
     print(f"window   : {start} .. {today}  ({args.years} years)")
     print(f"threshold: each station's own {args.quantile:.0%} wet-day quantile\n")
 
-    stations = [s for s in norwegian_stations(cid)
-                if DOMAIN["south"] < s["lat"] < DOMAIN["north"]
-                and DOMAIN["west"] < s["lon"] < DOMAIN["east"]]
+    # Record length first, geography second. Spreading by latitude and then
+    # discarding short records threw away more than half the sample: 25 of 60
+    # survived, which made "4 stations at once" a weak claim about a widespread
+    # event. Frost reports validFrom, so stations that cannot cover the window
+    # are dropped before they cost an API call.
+    raw = frost_get("sources/v0.jsonld",
+                    {"types": "SensorSystem", "country": "Norge"}, cid).get("data", [])
+    stations = []
+    for src in raw:
+        geo = src.get("geometry") or {}
+        c = geo.get("coordinates")
+        if not c:
+            continue
+        lat_, lon_ = float(c[1]), float(c[0])
+        if not (DOMAIN["south"] < lat_ < DOMAIN["north"]
+                and DOMAIN["west"] < lon_ < DOMAIN["east"]):
+            continue
+        vf = (src.get("validFrom") or "")[:10]
+        if not vf or vf > str(start):
+            continue                      # opened after the window began
+        vt = (src.get("validTo") or "")[:10]
+        if vt and vt < str(today - dt.timedelta(days=90)):
+            continue                      # closed before the window ended
+        stations.append({"id": src["id"], "name": src.get("name", src["id"]),
+                         "lat": lat_, "lon": lon_, "masl": src.get("masl")})
+
+    print(f"  {len(stations)} stations cover the whole window")
     stations.sort(key=lambda s: s["lat"])
     if len(stations) > args.max_stations:
         step = len(stations) / args.max_stations
         stations = [stations[int(i * step)] for i in range(args.max_stations)]
-    print(f"  {len(stations)} stations, spread by latitude\n")
+    print(f"  {len(stations)} kept, spread by latitude\n")
 
     cache = args.out / "cache"
     series: dict = {}
@@ -141,7 +164,8 @@ def main() -> int:
             continue
         thresh[sid] = float(np.quantile(wet, args.quantile))
         nwet[sid] = int(wet.size)
-    print(f"\n  {len(thresh)} stations with enough wet days to define a threshold")
+    print(f"\n  {len(thresh)} of {len(stations)} stations have enough wet days "
+          f"to define a threshold")
     if not thresh:
         print("Nothing to rank.", file=sys.stderr)
         return 2
