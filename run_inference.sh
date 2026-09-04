@@ -223,12 +223,33 @@ else
     rm -rf "$MEPS"
   fi
   step "5/7  MEPS dataset — building for $T0"
-  # The recipe's OPeNDAP URLs are already {date:strftime(...)} templates, so
-  # only the dates block is pinned. Substitute it into a per-date copy rather
-  # than editing the checked-in recipe, which is hard-won and shared.
+  # Both the dates AND the cycle are pinned into a per-date copy, rather than
+  # editing the checked-in recipe, which is hard-won and shared.
+  #
+  # WHY THE CYCLE IS PINNED. The recipe's URLs are {date:strftime(...)}
+  # templates, so each state asks for its own cycle file: the t0-6h state
+  # wants the 18Z file and t0 wants the 00Z one. A MEPS cycle runs 67 hourly
+  # steps FORWARD, so the 00Z file does not contain 18:00 - it is six hours
+  # older than the file's own start. Every field for that state then failed to
+  # resolve and was written as NaN.
+  #
+  # It did not fail loudly. The dataset came out with the right shape, dates
+  # and variable count, and every value NaN; the forecast ran to COMPLETED on
+  # it and wrote 350 MB of NaN. dataset_complete now measures finiteness for
+  # exactly this reason.
+  #
+  # April never showed it because a single 18Z cycle spans both states, and
+  # that was the only date ever built. Pinning both states to the t0-6h cycle
+  # makes that the rule rather than a coincidence: it starts at t0-6h and runs
+  # forward, so it always contains t0 as well.
+  CYCLE_DIR="$(date -u -d "${PREV//T/ } UTC" +%Y/%m/%d)"
+  CYCLE_TAG="$(date -u -d "${PREV//T/ } UTC" +%Y%m%dT%HZ)"
   sed -e "s|^  start: .*|  start: $PREV|" \
       -e "s|^  end: .*|  end: $T0|" \
+      -e "s|{date:strftime(%Y)}/{date:strftime(%m)}/{date:strftime(%d)}|$CYCLE_DIR|g" \
+      -e "s|_{date:strftime(%Y%m%d)}T{date:strftime(%H)}Z|_$CYCLE_TAG|g" \
       "$REPO_DIR/bris/configs/meps_2p5km.yaml" > "$MEPS_RECIPE"
+  echo "  cycle: $CYCLE_TAG  (both states read from this one file)"
   # Wrapped rather than called directly: 0.5.24's json_tidy cannot serialise
   # the numpy integers MEPS carries in its coordinates. See the script.
   "$DATA_ENV/bin/python" "$REPO_DIR/scripts/anemoi_create.py" \
