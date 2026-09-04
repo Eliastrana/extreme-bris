@@ -48,6 +48,24 @@ CONVERT = {
     "precipitation_amount":      (lambda a: a,          "mm",  "Blues"),
 }
 
+# How strongly a value should paint, separate from its colour. A field like
+# temperature covers the whole domain with a meaningful number, so every
+# finite pixel is opaque. Precipitation does not: two thirds of pixels are
+# exactly 0 mm, and drawing 0 mm at full opacity paints the driest cell the
+# same strength as a wet one - the map reads as a white haze sitting over the
+# whole domain instead of showing the basemap where nothing is falling. Ramp
+# opacity in below half a millimetre instead, so dry areas are transparent
+# and only actual rain covers the map.
+ALPHA = {
+    # numpy is imported inside main(), not at module scope, so this leans on
+    # the ndarray's own .clip() rather than calling np.clip() by name.
+    "precipitation_amount": lambda a: (a / 0.5).clip(0.0, 1.0),
+}
+
+
+def default_alpha(a):
+    return 1.0
+
 
 def mercator_y(lat_deg, np):
     """Web Mercator y, clamped short of the poles where it diverges."""
@@ -93,6 +111,7 @@ def main() -> int:
               file=sys.stderr)
         return 1
     convert, unit, cmap_name = CONVERT.get(args.var, (lambda a: a, "", "viridis"))
+    alpha_of = ALPHA.get(args.var, default_alpha)
 
     bbox = None
     if args.bbox:
@@ -283,7 +302,7 @@ def main() -> int:
         entries = []
         for n, (k, img) in enumerate(zip(l["steps"], l["grids"])):
             rgba = cmap(norm(img))
-            rgba[..., 3] = np.where(np.isfinite(img), 1.0, 0.0)
+            rgba[..., 3] = np.where(np.isfinite(img), alpha_of(img), 0.0)
             fname = f"{l['name']}_{args.var}_{n:02d}.png"
             imsave(args.out / fname, rgba)
             entries.append({"step": k, "lead_hours": k * 6,
