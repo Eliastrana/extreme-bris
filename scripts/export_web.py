@@ -131,6 +131,12 @@ def main() -> int:
                     help="output raster width; default follows the source grid, "
                          "because a target finer than the source turns forward "
                          "scatter into a sieve")
+    ap.add_argument("--vmin", type=float, default=None,
+                    help="pin the low end of the colour scale instead of "
+                         "taking the 1st percentile. Use when exporting a "
+                         "second run that has to be comparable with the first")
+    ap.add_argument("--vmax", type=float, default=None,
+                    help="pin the high end; see --vmin")
     ap.add_argument("-o", "--out", type=Path, default=Path("web/nordic"))
     args = ap.parse_args()
 
@@ -342,6 +348,14 @@ def main() -> int:
     stack = np.concatenate([g[np.isfinite(g)].ravel()
                             for l in layers for g in l["grids"]])
     vmin, vmax = float(np.percentile(stack, 1)), float(np.percentile(stack, 99))
+    # Two runs of the SAME variable - ERA5-initialised against analysis-
+    # initialised - have to be read against one scale, or the eye reads the
+    # difference between two colour scales as a difference between two
+    # forecasts. Export one, then pin the other to the numbers it reports.
+    if args.vmin is not None:
+        vmin = args.vmin
+    if args.vmax is not None:
+        vmax = args.vmax
     if not np.isfinite(vmin) or not np.isfinite(vmax) or vmax - vmin < 1e-9:
         lo, hi = float(np.nanmin(stack)), float(np.nanmax(stack))
         pad = max(abs(hi) * 1e-3, 0.5)
