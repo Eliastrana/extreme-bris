@@ -131,6 +131,13 @@ def main() -> int:
                     help="output raster width; default follows the source grid, "
                          "because a target finer than the source turns forward "
                          "scatter into a sieve")
+    # Was hardcoded to the ERA5 wording, which silently became a false claim
+    # the moment the same script exported an operational-analysis run.
+    ap.add_argument("--caveat",
+                    default="Initialised from ERA5, not the operational analysis "
+                            "Bris was trained on. Not a skill estimate.",
+                    help="what the manifest should say about this run's "
+                         "provenance. Change it when the inputs change")
     ap.add_argument("--vmin", type=float, default=None,
                     help="pin the low end of the colour scale instead of "
                          "taking the 1st percentile. Use when exporting a "
@@ -406,8 +413,7 @@ def main() -> int:
         "colormap": cmap_name,
         "legend": swatches,
         "initialised": layers[0]["times"][0].strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "caveat": ("Initialised from ERA5, not the operational analysis Bris was "
-                   "trained on. Not a skill estimate."),
+        "caveat": args.caveat,
         "layers": out_layers,
     }
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2))
