@@ -56,13 +56,18 @@ TAG="$(date -u -d "${DATE//T/ } UTC" +%Y%m%dT%HZ)"
 # multistep_input = 2: the recipes must span t0-6h .. t0. One state is not enough.
 PREV="$(date -u -d "${DATE//T/ } UTC - 6 hours" +%Y-%m-%dT%H:%M:%S)"
 
-ERA5="$BRIS_DATA_DIR/era5-n320-${TAG}-6h-v1.zarr"
+# The global half defaults to ERA5. BRIS_GLOBAL_ZARR points it at an already
+# built dataset instead - specifically one from the operational analysis
+# (class od), which is what Bris was actually trained on. Holding the LAM, the
+# date and the model fixed and changing only this leaves the initialisation
+# source as the single difference between two runs.
+ERA5="${BRIS_GLOBAL_ZARR:-$BRIS_DATA_DIR/era5-n320-${TAG}-6h-v1.zarr}"
 MEPS="$BRIS_DATA_DIR/meps-2p5km-${TAG}-6h-v1.zarr"
 
 # The first case was built before any of this was date-driven. Retrieving ERA5
 # through CDS costs hours of tape, so do not orphan a good dataset over a
-# filename change.
-if [[ "$T0" == "2025-04-01T00:00:00" ]]; then
+# filename change. Skipped when the global side was named explicitly.
+if [[ -z "${BRIS_GLOBAL_ZARR:-}" && "$T0" == "2025-04-01T00:00:00" ]]; then
   [[ -e "$BRIS_DATA_DIR/era5-n320-2025-6h-v1.zarr"  && ! -e "$ERA5" ]] && \
       ERA5="$BRIS_DATA_DIR/era5-n320-2025-6h-v1.zarr"
   [[ -e "$BRIS_DATA_DIR/meps-2p5km-2025-6h-v1.zarr" && ! -e "$MEPS" ]] && \
@@ -137,8 +142,13 @@ mkdir -p "$RECIPES"
 # about five days behind real time and the final stream months behind, so a
 # recent date is not slow to retrieve - it does not exist. Say so here rather
 # than letting CDS return an empty result that builds a dataset with no data.
+# Only ERA5 has this problem. The operational analysis is available within
+# hours, so when BRIS_GLOBAL_ZARR names a prebuilt od dataset the lag guard
+# below would reject dates that are perfectly retrievable.
 AGE_DAYS=$(( ( $(date -u +%s) - $(date -u -d "${DATE//T/ } UTC" +%s) ) / 86400 ))
-if (( AGE_DAYS < 0 )); then
+if [[ -n "${BRIS_GLOBAL_ZARR:-}" ]]; then
+  :
+elif (( AGE_DAYS < 0 )); then
   echo "ERROR: $T0 is in the future. ERA5 cannot initialise a forecast of the" >&2
   echo "       future; it is a reanalysis of the past." >&2
   exit 1
