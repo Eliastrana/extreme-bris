@@ -74,6 +74,41 @@ def mercator_y(lat_deg, np):
     return np.log(np.tan(np.pi / 4 + r / 2))
 
 
+def covered_by(lower, upper, np):
+    """Which pixels of `lower` sit underneath `upper`'s domain, geographically.
+
+    Each pixel of the lower raster is turned back into lon/lat and looked up
+    in the upper raster - the same inverse sampling the global field already
+    uses, run on the domain mask instead of the values.
+
+    The upper domain is the union over timesteps rather than any single one.
+    A dry cell is 0.0, not NaN, so for most fields one step would do; but
+    precipitation has no value at all at analysis time, and taking the mask
+    from that step alone would say the LAM covers nothing.
+    """
+    W, H = lower["W"], lower["H"]
+    y0 = mercator_y(lower["lat0"], np)
+    y1 = mercator_y(lower["lat1"], np)
+    lon = lower["lon0"] + (np.arange(W) / max(W - 1, 1)) * (lower["lon1"] - lower["lon0"])
+    yy = y0 + ((H - 1 - np.arange(H)) / max(H - 1, 1)) * (y1 - y0)
+    lat = np.degrees(2 * np.arctan(np.exp(yy)) - np.pi / 2)
+
+    dom = np.zeros((upper["H"], upper["W"]), dtype=bool)
+    for g in upper["grids"]:
+        dom |= np.isfinite(g)
+
+    uy0 = mercator_y(upper["lat0"], np)
+    uy1 = mercator_y(upper["lat1"], np)
+    ux = (lon[None, :] - upper["lon0"]) / (upper["lon1"] - upper["lon0"]) * (upper["W"] - 1)
+    uy = (mercator_y(lat, np)[:, None] - uy0) / (uy1 - uy0) * (upper["H"] - 1)
+    uy = (upper["H"] - 1) - uy
+
+    xi = np.rint(ux).astype("int64")
+    yi = np.rint(uy).astype("int64")
+    inside = ((xi >= 0) & (xi < upper["W"])) & ((yi >= 0) & (yi < upper["H"]))
+    return inside & dom[np.clip(yi, 0, upper["H"] - 1), np.clip(xi, 0, upper["W"] - 1)]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -277,6 +312,28 @@ def main() -> int:
     if len(lead_sets) > 1:
         print("ERROR: the inputs do not share a timestep list.", file=sys.stderr)
         return 1
+
+    # --- punch the upper domains out of the layers below them ----------------
+    # The model's cutout already removed the global points under the LAM, so
+    # what the global field holds there is not weather: it interpolates to
+    # 0.25 degrees with nothing to interpolate from and smears values in from
+    # the neighbours, which draws as wedges radiating out of Scandinavia.
+    #
+    # Painting the LAM on top used to hide that, but only while every pixel of
+    # the LAM was opaque. The moment a field is drawn with transparency -
+    # precipitation, where two thirds of the domain is dry - the artefact
+    # shows straight through the gaps. Removing it here rather than relying on
+    # the layer above to cover it means the seam is gone in the data, at any
+    # opacity, for every variable.
+    for i, lower in enumerate(layers):
+        for upper in layers[i + 1:]:
+            mask = covered_by(lower, upper, np)
+            if not mask.any():
+                continue
+            for g in lower["grids"]:
+                g[mask] = np.nan
+            print(f"  masked {mask.mean() * 100:.1f}% of {lower['name']} "
+                  f"where {upper['name']} covers it")
 
     # --- ONE colour scale across every layer and every step ------------------
     # Scaling each domain to its own range puts a colour jump on the seam that
