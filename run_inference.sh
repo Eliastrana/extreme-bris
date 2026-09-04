@@ -66,9 +66,14 @@ MEPS="$BRIS_DATA_DIR/meps-2p5km-${TAG}-6h-v1.zarr"
 
 # The first case was built before any of this was date-driven. Retrieving ERA5
 # through CDS costs hours of tape, so do not orphan a good dataset over a
-# filename change. Skipped when the global side was named explicitly.
-if [[ -z "${BRIS_GLOBAL_ZARR:-}" && "$T0" == "2025-04-01T00:00:00" ]]; then
-  [[ -e "$BRIS_DATA_DIR/era5-n320-2025-6h-v1.zarr"  && ! -e "$ERA5" ]] && \
+# filename change.
+#
+# The guard belongs on the ERA5 line ALONE. Putting it on the whole block also
+# disabled the MEPS fallback, which sent the script off to rebuild the LAM from
+# a thredds date the archive no longer carries - the global override says
+# nothing about where the LAM should come from.
+if [[ "$T0" == "2025-04-01T00:00:00" ]]; then
+  [[ -z "${BRIS_GLOBAL_ZARR:-}" && -e "$BRIS_DATA_DIR/era5-n320-2025-6h-v1.zarr" && ! -e "$ERA5" ]] && \
       ERA5="$BRIS_DATA_DIR/era5-n320-2025-6h-v1.zarr"
   [[ -e "$BRIS_DATA_DIR/meps-2p5km-2025-6h-v1.zarr" && ! -e "$MEPS" ]] && \
       MEPS="$BRIS_DATA_DIR/meps-2p5km-2025-6h-v1.zarr"
