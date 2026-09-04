@@ -179,12 +179,20 @@ start=$SECONDS
 # onto hardware.paths.data itself.
 mkdir -p "$OUTPUT_DIR"
 RUN_CONFIG="$OUTPUT_DIR/config-${SLURM_JOB_ID:-manual}.yaml"
+#
+# dataset_lam gets the same treatment. Substituting only the global half meant
+# a run for any date other than the original one paired a freshly built LAM
+# with the hardcoded April file: the cutout then had no dates in common and
+# died on `min() iterable argument is empty`. Loud, but only by luck - two
+# datasets from NEARBY dates would have overlapped and quietly mixed the wrong
+# LAM into the forecast.
 sed -e "s|^    leadtimes: .*|    leadtimes: $LEADTIMES|" \
     ${BRIS_GLOBAL_ZARR:+-e "s|^    dataset_global: .*|    dataset_global: $(basename "$BRIS_GLOBAL_ZARR")|"} \
+    ${BRIS_LAM_ZARR:+-e "s|^    dataset_lam: .*|    dataset_lam: $(basename "$BRIS_LAM_ZARR")|"} \
     "$CONFIG" > "$RUN_CONFIG"
 echo "=== config  : $RUN_CONFIG  (leadtimes -> $LEADTIMES)"
 grep -n "^    leadtimes:" "$RUN_CONFIG"
-grep -n "^    dataset_global:" "$RUN_CONFIG"
+grep -n "^    dataset_global:\|^    dataset_lam:" "$RUN_CONFIG"
 
 srun uv run bris \
   --config "$RUN_CONFIG" \

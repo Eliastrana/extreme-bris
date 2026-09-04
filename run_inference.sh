@@ -287,7 +287,7 @@ echo "  submitting and waiting"
 sbatch --wait \
   --partition="$PARTITION" --gres="$GRES" --ntasks-per-node="$NTASKS" \
   --output="$LOGS/forecast-%j.out" --error="$LOGS/forecast-%j.err" \
-  --export=ALL,BRIS_DATE="$DATE",BRIS_OUTPUT_DIR="$OUT",BRIS_GPUS_PER_MODEL="$SHARD",BRIS_LEADTIMES="$LEADTIMES" \
+  --export=ALL,BRIS_DATE="$DATE",BRIS_OUTPUT_DIR="$OUT",BRIS_GPUS_PER_MODEL="$SHARD",BRIS_LEADTIMES="$LEADTIMES",BRIS_GLOBAL_ZARR="$ERA5",BRIS_LAM_ZARR="$MEPS" \
   "$REPO_DIR/bris/slurm/bris_smoke.sbatch"
 rc=$?
 
