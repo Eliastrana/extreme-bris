@@ -91,6 +91,10 @@ export HYDRA_FULL_ERROR=1
 # the config's inference_num_chunks has no effect — the log still says
 # "chunked to 8" because bris prints its own value, not the model's.
 export ANEMOI_INFERENCE_NUM_CHUNKS="${BRIS_NUM_CHUNKS:-8}"
+# Echoed because bris's own "chunked to N" line prints a value that is not
+# this one, so the log cannot otherwise tell you whether raising it took
+# effect - which matters when you are raising it to escape an OOM.
+echo "=== chunks  : ANEMOI_INFERENCE_NUM_CHUNKS=$ANEMOI_INFERENCE_NUM_CHUNKS"
 # Makes OOM report the real allocation site rather than a cascade of retries.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
