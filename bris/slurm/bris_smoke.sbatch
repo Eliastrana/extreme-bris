@@ -170,11 +170,21 @@ start=$SECONDS
 # interpolations, so `leadtimes` cannot be an ${oc.env:...} reference — it has
 # to be a literal. Write a per-run copy with the value substituted, next to the
 # output, so each run carries a record of exactly what it was given.
+#
+# dataset_global is substituted the same way, and for the same reason: the
+# config names it as a literal filename, so pointing run_inference.sh at an
+# operational-analysis build with BRIS_GLOBAL_ZARR would otherwise steer the
+# BUILD and leave the FORECAST reading ERA5 - a run that silently answers a
+# different question than the one asked. basename, because the config joins it
+# onto hardware.paths.data itself.
 mkdir -p "$OUTPUT_DIR"
 RUN_CONFIG="$OUTPUT_DIR/config-${SLURM_JOB_ID:-manual}.yaml"
-sed -e "s|^    leadtimes: .*|    leadtimes: $LEADTIMES|" "$CONFIG" > "$RUN_CONFIG"
+sed -e "s|^    leadtimes: .*|    leadtimes: $LEADTIMES|" \
+    ${BRIS_GLOBAL_ZARR:+-e "s|^    dataset_global: .*|    dataset_global: $(basename "$BRIS_GLOBAL_ZARR")|"} \
+    "$CONFIG" > "$RUN_CONFIG"
 echo "=== config  : $RUN_CONFIG  (leadtimes -> $LEADTIMES)"
 grep -n "^    leadtimes:" "$RUN_CONFIG"
+grep -n "^    dataset_global:" "$RUN_CONFIG"
 
 srun uv run bris \
   --config "$RUN_CONFIG" \
