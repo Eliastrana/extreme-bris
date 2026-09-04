@@ -117,8 +117,32 @@ except Exception:
 # variables here: the inference config selects all 98 by name.
 EXPECTED_VARS=98
 
+# Fraction of the last state that is an actual number. A build can fail to
+# find its data and still write a structurally perfect zarr: right shape,
+# right dates, right variable count, every value NaN.
+finite_frac() {
+  "$DATA_ENV/bin/python" -c "
+import sys, numpy as np, zarr
+try:
+    g = zarr.open(sys.argv[1], mode='r')
+    a = np.asarray(g['data'][-1, :, 0, ::37], dtype='float64')
+    print(f'{np.isfinite(a).mean():.4f}')
+except Exception:
+    print('0.0')
+" "$1" 2>/dev/null
+}
+
+# Variable count alone accepted an all-NaN MEPS dataset, which then ran a
+# forecast to completion and wrote 350 MB of NaN. The count was right; there
+# was simply no data behind it. Anything under half finite is not a dataset.
 dataset_complete() {
-  dataset_ok "$1" && [[ "$(n_vars "$1")" == "$EXPECTED_VARS" ]]
+  dataset_ok "$1" || return 1
+  [[ "$(n_vars "$1")" == "$EXPECTED_VARS" ]] || return 1
+  local f; f="$(finite_frac "$1")"
+  awk -v x="$f" 'BEGIN { exit !(x > 0.5) }' || {
+    echo "  WARNING: $(basename "$1") is only ${f} finite - built but empty." >&2
+    return 1
+  }
 }
 
 # --- state ------------------------------------------------------------------
