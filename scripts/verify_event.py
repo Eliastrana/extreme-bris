@@ -65,7 +65,10 @@ def main() -> int:
     # The 06-06 window, located by valid time rather than by assuming an
     # index. Each step carries the accumulation over the 6 h ENDING at its
     # valid time, so the window is the four steps valid 12Z, 18Z, 00Z, 06Z.
-    want_end = [dt.datetime.combine(day, dt.time(6)) + dt.timedelta(hours=6 * k)
+    # First block of the 06-06 day is 06-12Z, which ENDS at 12Z - so the window
+    # starts at the step valid 12Z, not the one valid 06Z. The step valid 06Z
+    # carries 00-06Z, which belongs to the previous observation day.
+    want_end = [dt.datetime.combine(day, dt.time(12)) + dt.timedelta(hours=6 * k)
                 for k in range(4)]
     idx = []
     for w in want_end:
