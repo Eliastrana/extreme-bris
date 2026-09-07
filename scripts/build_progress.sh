@@ -106,12 +106,20 @@ except Exception as exc:
 PYEOF
 
     # TMPDIR is node-local, so this has to run on the node that holds the job.
-    # One line for the node, not for the job: the caches are unlabelled temp
-    # dirs, so there is no honest way to attribute them to one job of several
-    # sharing a node. What matters is the headroom either way.
-    [[ "$state" == "RUNNING" ]] && srun --jobid="$job" --overlap --quiet bash -c '
-        c=$(du -sc /tmp/tmp*/ 2>/dev/null | tail -1 | cut -f1)
-        [[ -n "$c" ]] && echo "  caches: $((c/1048576))G in /tmp on $(hostname) (all jobs)"
-        echo "  /tmp  : $(df -h /tmp | awk "NR==2{print \$4\" free of \"\$2}")"
-    ' 2>/dev/null
+    # The GRIB cache moved off the node in the disk fix, so reporting the
+    # node's /tmp told us nothing: it read 0G while MARS was pulling gigabytes
+    # into $HOME. Report where the fields actually land, and how fresh the
+    # newest one is - for MARS that is the only sign of life there is, because
+    # the client buffers its log and can look stalled while transferring.
+    cache="${BRIS_CACHE_DIR:-$HOME/bris-cache}"
+    if [[ -d "$cache" ]]; then
+        newest=$(find "$cache" -type f -newermt "-10 minutes" -printf '%T@\n' 2>/dev/null \
+                 | sort -n | tail -1)
+        printf '  cache : %s' "$(du -sh "$cache" | cut -f1)"
+        if [[ -n "$newest" ]]; then
+            printf ', last write %s\n' "$(date -d "@${newest%.*}" +%H:%M:%S)"
+        else
+            printf ', nothing written in 10 min\n'
+        fi
+    fi
 done
