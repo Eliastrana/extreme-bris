@@ -46,6 +46,19 @@ DATA_ENV="${BRIS_DATA_ENV_DIR:-$HOME/bris-data-env}"
 : "${OUT:?set OUT=<output.zarr>}"
 THREADS="${THREADS:-4}"
 
+# KEEP THE GRIB CACHE OFF THE NODE'S LOCAL DISK. earthkit writes every field
+# it retrieves into a temp dir under TMPDIR and never evicts any of it, so the
+# cache grows monotonically for the whole build. On n001 that is a 40 GB
+# partition shared with every other job on the node. A year of class od ran it
+# to 22 GB by the third month and would have hit the wall around the seventh -
+# after six hours of retrieval, with nothing kept.
+#
+# $HOME has hundreds of terabytes and already holds the zarr this writes, so
+# the cache belongs there. Cleared on exit: it is scratch, not a result.
+export TMPDIR="${BRIS_TMPDIR:-$HOME/bris-tmp}/${SLURM_JOB_ID:-$$}"
+mkdir -p "$TMPDIR" || { echo "ERROR: cannot create $TMPDIR" >&2; exit 1; }
+trap 'rm -rf "$TMPDIR"' EXIT
+
 [[ -f "$RECIPE" ]] || { echo "ERROR: no recipe at $RECIPE" >&2; exit 1; }
 [[ -x "$DATA_ENV/bin/python" ]] || { echo "ERROR: no data env at $DATA_ENV" >&2; exit 1; }
 
@@ -53,6 +66,7 @@ echo "=== node    : $(hostname)"
 echo "=== recipe  : $RECIPE"
 echo "=== out     : $OUT"
 echo "=== threads : $THREADS"
+echo "=== tmpdir  : $TMPDIR ($(df -h "$TMPDIR" | awk 'NR==2{print $4}') free)"
 sed -n '/^dates:/,/^$/p' "$RECIPE"
 echo
 
