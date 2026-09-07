@@ -24,6 +24,19 @@ worker count low: thredds.met.no is a shared public service.
 TWO KINDS OF HOLE, ONE OUTPUT. Absent files and short files are indistinguish-
 able once the build is running, and the recipe treats them the same way, so
 they are reported together and separately explained in the summary.
+
+A THIRD KIND IS NOT A HOLE. The first version of this returned "absent" for
+any request that did not succeed, so when the login node turned out to sit
+behind a TLS-inspecting proxy that Python does not trust, it declared all 1456
+states missing and wrote a file that would have emptied the whole recipe. An
+unreachable server is not an empty archive. Anything that is not a clean 200
+or a clean 404 is now counted separately and makes the run exit non-zero, so
+a broken scan cannot be mistaken for a scanned year.
+
+Run it where TLS works. curl on the login node trusts the proxy root and
+Python does not; the compute nodes reach thredds directly:
+
+    srun -p defq -n1 -t 30 scripts/scan_meps_archive.py --start ... --end ...
 """
 
 from __future__ import annotations
@@ -56,30 +69,41 @@ def cycles(start: dt.datetime, end: dt.datetime, hours: int):
         t += dt.timedelta(hours=hours)
 
 
-def day_catalog(session: requests.Session, day: dt.date) -> set[str]:
-    """Names present in one day's catalogue, or an empty set if the day is gone."""
+def day_catalog(session: requests.Session, day: dt.date):
+    """(names, error) for one day. A 404 is an empty day; anything else is an error.
+
+    Never collapse the two. A day that is genuinely gone and a day the scanner
+    could not ask about look identical in the return value if errors are
+    swallowed, and the second one silently deletes a real day from the recipe.
+    """
     url = CATALOG.format(y=day.year, m=day.month, d=day.day)
     try:
         r = session.get(url, timeout=30)
-    except requests.RequestException:
-        return set()
+    except requests.RequestException as exc:
+        return set(), f"{type(exc).__name__}"
+    if r.status_code == 404:
+        return set(), None
     if r.status_code != 200:
-        return set()
-    return {f"meps_det_{k}_{s}" for k, s in NCML.findall(r.text)}
+        return set(), f"HTTP {r.status_code}"
+    return {f"meps_det_{k}_{s}" for k, s in NCML.findall(r.text)}, None
 
 
-def level_count(session: requests.Session, t: dt.datetime) -> int:
-    """Pressure levels the pl file for this cycle actually offers. -1 on error."""
+def level_count(session: requests.Session, t: dt.datetime):
+    """(levels, error) for one cycle's pl file. levels is None when unknown."""
     url = DODS.format(y=t.year, m=t.month, d=t.day,
                       name=f"meps_det_pl_{t:%Y%m%dT%H}Z")
     try:
         r = session.get(url, timeout=45)
-    except requests.RequestException:
-        return -1
+    except requests.RequestException as exc:
+        return None, f"{type(exc).__name__}"
+    if r.status_code == 404:
+        return 0, None
     if r.status_code != 200:
-        return -1
+        return None, f"HTTP {r.status_code}"
     m = PRESSURE.search(r.text)
-    return int(m.group(1)) if m else -1
+    if not m:
+        return None, "no pressure dimension in .dds"
+    return int(m.group(1)), None
 
 
 def main() -> int:
@@ -102,25 +126,37 @@ def main() -> int:
     print(f"{len(wanted)} states over {len(days)} days", file=sys.stderr)
 
     session = requests.Session()
+    errors: dict[str, str] = {}
 
     # Stage 1: presence. One request per day covers every cycle in it.
     print("catalogues ...", file=sys.stderr)
     with ThreadPoolExecutor(args.workers) as pool:
-        present = dict(zip(days, pool.map(lambda d: day_catalog(session, d), days)))
+        results = list(pool.map(lambda d: day_catalog(session, d), days))
+    present = {}
+    for day, (names, err) in zip(days, results):
+        present[day] = names
+        if err:
+            errors[f"{day} catalogue"] = err
 
+    bad_days = {day for day, (_n, err) in zip(days, results) if err}
     absent = [t for t in wanted
-              if f"meps_det_sfc_{t:%Y%m%dT%H}Z" not in present[t.date()]
-              or f"meps_det_pl_{t:%Y%m%dT%H}Z" not in present[t.date()]]
+              if t.date() not in bad_days
+              and (f"meps_det_sfc_{t:%Y%m%dT%H}Z" not in present[t.date()]
+                   or f"meps_det_pl_{t:%Y%m%dT%H}Z" not in present[t.date()])]
     print(f"  absent: {len(absent)}", file=sys.stderr)
 
     # Stage 2: shape. A file that exists can still be too thin to use.
     short: list[tuple[dt.datetime, int]] = []
     if not args.skip_levels:
-        check = [t for t in wanted if t not in set(absent)]
+        skip = set(absent)
+        check = [t for t in wanted if t not in skip and t.date() not in bad_days]
         print(f"headers for {len(check)} pl files ...", file=sys.stderr)
         with ThreadPoolExecutor(args.workers) as pool:
-            for t, n in zip(check, pool.map(lambda t: level_count(session, t), check)):
-                if n < len(LEVELS):
+            for t, (n, err) in zip(check, pool.map(
+                    lambda t: level_count(session, t), check)):
+                if err:
+                    errors[f"{t:%Y-%m-%dT%H} levels"] = err
+                elif n < len(LEVELS):
                     short.append((t, n))
         print(f"  short: {len(short)}", file=sys.stderr)
 
@@ -137,6 +173,18 @@ def main() -> int:
               f"need {len(LEVELS)}) ---")
         for t, n in short:
             print(f"  {t:%Y-%m-%dT%H:%M:%S}  {n} levels")
+
+    # A scan that could not ask is not a scan that found nothing. Say so, and
+    # do not write a list that would delete days the archive may well hold.
+    if errors:
+        kinds: dict[str, int] = {}
+        for v in errors.values():
+            kinds[v] = kinds.get(v, 0) + 1
+        print(f"\n=== {len(errors)} REQUESTS FAILED - result is incomplete")
+        for k, n in sorted(kinds.items(), key=lambda kv: -kv[1]):
+            print(f"  {n:5d}  {k}")
+        print("  no list written; rerun where thredds is reachable")
+        return 2
 
     if args.out:
         args.out.write_text("".join(f"{t:%Y-%m-%dT%H:%M:%S}\n" for t in bad))
