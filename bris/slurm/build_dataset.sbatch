@@ -59,6 +59,22 @@ export TMPDIR="${BRIS_TMPDIR:-$HOME/bris-tmp}/${SLURM_JOB_ID:-$$}"
 mkdir -p "$TMPDIR" || { echo "ERROR: cannot create $TMPDIR" >&2; exit 1; }
 trap 'rm -rf "$TMPDIR"' EXIT
 
+# MAKE A RETRY CHEAP. earthkit's default cache policy is "off", which means a
+# fresh temp dir per run: every failure throws away everything retrieved. Both
+# year-one builds died after five hours, one on a missing archive file and one
+# on a full disk, and both would have to fetch the whole year again.
+#
+# Policy "user" keeps the cache at a fixed path across runs, so a resubmit
+# re-reads what it already has and only fetches the rest. Eviction is governed
+# by maximum-cache-disk-usage, 95% by default, which $HOME will not approach.
+#
+# This is safe only because the inputs are immutable: an archived MEPS cycle
+# and a MARS analysis do not change after the fact. If a source is ever
+# corrected in place, delete $BRIS_CACHE_DIR - nothing else notices staleness.
+export EARTHKIT_DATA_CACHE_POLICY=user
+export EARTHKIT_DATA_USER_CACHE_DIRECTORY="${BRIS_CACHE_DIR:-$HOME/bris-cache}"
+mkdir -p "$EARTHKIT_DATA_USER_CACHE_DIRECTORY"
+
 [[ -f "$RECIPE" ]] || { echo "ERROR: no recipe at $RECIPE" >&2; exit 1; }
 [[ -x "$DATA_ENV/bin/python" ]] || { echo "ERROR: no data env at $DATA_ENV" >&2; exit 1; }
 
@@ -67,6 +83,7 @@ echo "=== recipe  : $RECIPE"
 echo "=== out     : $OUT"
 echo "=== threads : $THREADS"
 echo "=== tmpdir  : $TMPDIR ($(df -h "$TMPDIR" | awk 'NR==2{print $4}') free)"
+echo "=== cache   : $EARTHKIT_DATA_USER_CACHE_DIRECTORY ($(du -sh "$EARTHKIT_DATA_USER_CACHE_DIRECTORY" 2>/dev/null | cut -f1) held)"
 sed -n '/^dates:/,/^$/p' "$RECIPE"
 echo
 
