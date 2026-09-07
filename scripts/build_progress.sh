@@ -22,6 +22,7 @@ set -uo pipefail
 
 export PATH=/cm/shared/apps/slurm/current/bin:$PATH
 LOGS="${BRIS_LOG_DIR:-$HOME/extreme-bris/logs}"
+PY="${BRIS_DATA_ENV_DIR:-$HOME/bris-data-env}/bin/python"
 
 jobs=("$@")
 if [[ ${#jobs[@]} -eq 0 ]]; then
@@ -81,6 +82,28 @@ for job in "${jobs[@]}"; do
 
     zarr=$(sed -n 's/^=== out *: //p' "$out" | head -1)
     [[ -n "$zarr" && -e "$zarr" ]] && echo "  zarr  : $(du -sh "$zarr" | cut -f1)"
+
+    # The frontier above is the furthest-ahead worker, not the job. With four
+    # threads, four monthly groups run at once, so the newest date in the log
+    # belongs to whichever group happens to lead - four minutes in it read
+    # December and called the job 23% done.
+    #
+    # anemoi keeps the real answer in the dataset: one completion flag per
+    # group, and the number of states in each. That is the same array the
+    # loader consults to decide what to skip, so it cannot drift from reality.
+    [[ -n "$zarr" && -d "$zarr/_build" ]] && "$PY" - "$zarr" <<'PYEOF'
+import sys
+import zarr
+try:
+    b = zarr.open(sys.argv[1], mode="r")["_build"]
+    flags, lengths = b["flags"][:], b["lengths"][:]
+    done = int(sum(int(n) for f, n in zip(flags, lengths) if f))
+    total = int(sum(int(n) for n in lengths))
+    print(f"  built : {done} of {total} states  ({100*done//total}%), "
+          f"{int(flags.sum())} of {len(flags)} groups")
+except Exception as exc:
+    print(f"  built : unreadable ({type(exc).__name__})")
+PYEOF
 
     # TMPDIR is node-local, so this has to run on the node that holds the job.
     # One line for the node, not for the job: the caches are unlabelled temp
