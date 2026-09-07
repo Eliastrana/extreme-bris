@@ -57,22 +57,8 @@ import runpy
 import sys
 from pathlib import Path
 
-
-def patch_accumulations() -> str:
-    from anemoi.datasets.create.sources import accumulations as acc
-
-    cls = acc.AccumulationFromLastStep
-    if hasattr(cls, "adjust_steps"):
-        return f"{cls.__name__}.adjust_steps already present - no patch applied"
-
-    def adjust_steps(self, startStep: int, endStep: int):
-        # Only ever called for a collapsed step (startStep == endStep). The
-        # window is the one compute() asserts on.
-        assert startStep == endStep, (startStep, endStep)
-        return (endStep - self.frequency, endStep)
-
-    cls.adjust_steps = adjust_steps
-    return f"patched {cls.__name__}.adjust_steps (window = endStep - frequency)"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from anemoi_patches import apply_all                      # noqa: E402
 
 
 def main() -> int:
@@ -80,7 +66,8 @@ def main() -> int:
         print(__doc__, file=sys.stderr)
         return 2
 
-    print(f"[patch] {patch_accumulations()}", file=sys.stderr)
+    for line in apply_all():
+        print(f"[patch] {line}", file=sys.stderr)
 
     script = Path(sys.executable).with_name("anemoi-datasets")
     if not script.exists():
