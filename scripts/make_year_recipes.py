@@ -44,14 +44,33 @@ CHUNKS = [
 ARCHIVE_START = dt.datetime(2023, 10, 1, 0)
 
 
-def dates_block(start: dt.datetime, end: dt.datetime) -> str:
-    return (f"dates:\n"
-            f"  start: {start:%Y-%m-%dT%H:%M:%S}\n"
-            f"  end: {end:%Y-%m-%dT%H:%M:%S}\n"
-            f"  frequency: 6h\n")
+def dates_block(start: dt.datetime, end: dt.datetime,
+                missing: list[dt.datetime] | None = None) -> str:
+    """The recipe's dates block, with known-bad states declared missing.
+
+    Six states of year one cannot be built: 2026-09-02 has no 00Z or 06Z cycle
+    at all, and every cycle of 2026-01-31 serves six pressure levels where the
+    recipe asks for twelve. Left undeclared, the first kills the build with a
+    404 after five hours of retrieval and the second writes NaN quietly.
+    Declared here, anemoi records them as missing and carries on.
+
+    The same list goes into both halves even though only MEPS has the holes.
+    The two are joined by cutout, so a date axis that differs between them is
+    a problem waiting for a later run to find; losing six states of global
+    analysis costs 0.4% and keeps the halves identical.
+    """
+    out = (f"dates:\n"
+           f"  start: {start:%Y-%m-%dT%H:%M:%S}\n"
+           f"  end: {end:%Y-%m-%dT%H:%M:%S}\n"
+           f"  frequency: 6h\n")
+    if missing:
+        out += "  missing:\n"
+        out += "".join(f"  - {d:%Y-%m-%dT%H:%M:%S}\n" for d in sorted(missing))
+    return out
 
 
-def replace_dates(text: str, start: dt.datetime, end: dt.datetime) -> str:
+def replace_dates(text: str, start: dt.datetime, end: dt.datetime,
+                  missing: list[dt.datetime] | None = None) -> str:
     """Swap the recipe's dates block, leaving every other line untouched.
 
     The URL templates must survive: each state is read from its own cycle as
@@ -62,7 +81,7 @@ def replace_dates(text: str, start: dt.datetime, end: dt.datetime) -> str:
     out, skipping = [], False
     for line in text.splitlines(keepends=True):
         if line.startswith("dates:"):
-            out.append(dates_block(start, end))
+            out.append(dates_block(start, end, missing))
             skipping = True
             continue
         if skipping:
@@ -85,7 +104,20 @@ def main() -> int:
     ap.add_argument("-o", "--out", type=Path,
                     default=Path.home() / "bris-runs" / "recipes")
     ap.add_argument("--data-dir", default="$BRIS_DATA_DIR")
+    ap.add_argument("--missing", type=Path, action="append", default=[],
+                    help="file of ISO datetimes to declare missing; repeatable. "
+                         "Produce one with scripts/scan_meps_archive.py.")
     args = ap.parse_args()
+
+    # Only the dates inside a chunk belong in that chunk's recipe, so read the
+    # whole set once and filter per chunk rather than trusting file names.
+    missing_all: list[dt.datetime] = []
+    for f in args.missing:
+        if not f.exists():
+            print(f"ERROR: no missing-dates file at {f}", file=sys.stderr)
+            return 1
+        for line in f.read_text().split():
+            missing_all.append(dt.datetime.fromisoformat(line))
 
     if not args.meps_base.exists():
         print(f"ERROR: no MEPS recipe at {args.meps_base}", file=sys.stderr)
@@ -102,8 +134,10 @@ def main() -> int:
                   file=sys.stderr)
         states = int((end - start).total_seconds() // (6 * 3600)) + 1
 
+        gaps = [d for d in missing_all if start <= d <= end]
+
         meps = args.out / f"meps-{name}.yaml"
-        meps.write_text(replace_dates(base, start, end))
+        meps.write_text(replace_dates(base, start, end, gaps))
 
         # The MARS generator is date-driven; emit it for the chunk's end and
         # then widen the dates block to the whole chunk.
@@ -115,10 +149,11 @@ def main() -> int:
         if r.returncode != 0:
             print(f"ERROR generating {od.name}:\n{r.stderr}", file=sys.stderr)
             return 1
-        od.write_text(replace_dates(od.read_text(), start, end))
+        od.write_text(replace_dates(od.read_text(), start, end, gaps))
 
         made.append((name, start, end, states, meps, od))
-        print(f"{name}: {start:%Y-%m-%d} .. {end:%Y-%m-%d}  {states:5d} states")
+        print(f"{name}: {start:%Y-%m-%d} .. {end:%Y-%m-%d}  {states:5d} states"
+              + (f"  ({len(gaps)} declared missing)" if gaps else ""))
         print(f"   {meps}")
         print(f"   {od}")
 
