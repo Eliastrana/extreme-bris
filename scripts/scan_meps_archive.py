@@ -43,8 +43,11 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import itertools
 import re
 import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -61,6 +64,60 @@ LEVELS = [50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000]
 NCML = re.compile(r"meps_det_(sfc|pl)_(\d{8}T\d{2}Z)\.ncml")
 PRESSURE = re.compile(r"Float32 pressure\[pressure = (\d+)\]")
 
+# One Session per thread. requests.Session is documented as not thread-safe,
+# and sharing one across the pool wedged a scan of year two: six workers sat
+# in poll() for ten minutes with no CPU while single requests to the same
+# server were answering in a tenth of a second. Thread-local sessions keep the
+# connection reuse without the shared mutable state.
+_local = threading.local()
+
+# Progress counter, so a hang is visible while it is happening rather than
+# inferred afterwards from thread stacks.
+_done = itertools.count(1)
+_progress_lock = threading.Lock()
+_last_report = [0.0]
+
+
+def session() -> requests.Session:
+    s = getattr(_local, "session", None)
+    if s is None:
+        s = _local.session = requests.Session()
+    return s
+
+
+def reset_progress() -> None:
+    """The counter is module state, so the second stage must start from one."""
+    global _done
+    _done = itertools.count(1)
+    _last_report[0] = 0.0
+
+
+def tick(total: int) -> None:
+    n = next(_done)
+    now = time.time()
+    with _progress_lock:
+        if now - _last_report[0] > 5 or n == total:
+            _last_report[0] = now
+            print(f"    {n}/{total}", end="\r", file=sys.stderr, flush=True)
+
+
+def get(url: str, timeout: int, tries: int = 3):
+    """(response, error). Retries transient failures; a 404 is an answer.
+
+    A read that wedges is far more likely than a server that is genuinely
+    slow, so the timeout is short and a retry cheap.
+    """
+    last = ""
+    for attempt in range(tries):
+        try:
+            return session().get(url, timeout=timeout), None
+        except requests.RequestException as exc:
+            last = type(exc).__name__
+            # A wedged connection stays wedged; drop the pool before retrying.
+            _local.session = None
+            time.sleep(2 ** attempt)
+    return None, last
+
 
 def cycles(start: dt.datetime, end: dt.datetime, hours: int):
     t = start
@@ -69,7 +126,7 @@ def cycles(start: dt.datetime, end: dt.datetime, hours: int):
         t += dt.timedelta(hours=hours)
 
 
-def day_catalog(session: requests.Session, day: dt.date):
+def day_catalog(day: dt.date, timeout: int, total: int):
     """(names, error) for one day. A 404 is an empty day; anything else is an error.
 
     Never collapse the two. A day that is genuinely gone and a day the scanner
@@ -77,10 +134,10 @@ def day_catalog(session: requests.Session, day: dt.date):
     swallowed, and the second one silently deletes a real day from the recipe.
     """
     url = CATALOG.format(y=day.year, m=day.month, d=day.day)
-    try:
-        r = session.get(url, timeout=30)
-    except requests.RequestException as exc:
-        return set(), f"{type(exc).__name__}"
+    r, err = get(url, timeout)
+    tick(total)
+    if err:
+        return set(), err
     if r.status_code == 404:
         return set(), None
     if r.status_code != 200:
@@ -88,14 +145,14 @@ def day_catalog(session: requests.Session, day: dt.date):
     return {f"meps_det_{k}_{s}" for k, s in NCML.findall(r.text)}, None
 
 
-def level_count(session: requests.Session, t: dt.datetime):
+def level_count(t: dt.datetime, timeout: int, total: int):
     """(levels, error) for one cycle's pl file. levels is None when unknown."""
     url = DODS.format(y=t.year, m=t.month, d=t.day,
                       name=f"meps_det_pl_{t:%Y%m%dT%H}Z")
-    try:
-        r = session.get(url, timeout=45)
-    except requests.RequestException as exc:
-        return None, f"{type(exc).__name__}"
+    r, err = get(url, timeout)
+    tick(total)
+    if err:
+        return None, err
     if r.status_code == 404:
         return 0, None
     if r.status_code != 200:
@@ -112,8 +169,10 @@ def main() -> int:
     ap.add_argument("--start", required=True)
     ap.add_argument("--end", required=True)
     ap.add_argument("--frequency", type=int, default=6, help="hours between states")
-    ap.add_argument("--workers", type=int, default=6,
+    ap.add_argument("--workers", type=int, default=4,
                     help="keep this modest; thredds is shared")
+    ap.add_argument("--timeout", type=int, default=20,
+                    help="seconds per request before retrying")
     ap.add_argument("--skip-levels", action="store_true",
                     help="only check presence, not level count")
     ap.add_argument("-o", "--out", type=Path)
@@ -125,13 +184,15 @@ def main() -> int:
     days = sorted({t.date() for t in wanted})
     print(f"{len(wanted)} states over {len(days)} days", file=sys.stderr)
 
-    session = requests.Session()
     errors: dict[str, str] = {}
 
     # Stage 1: presence. One request per day covers every cycle in it.
-    print("catalogues ...", file=sys.stderr)
+    print(f"catalogues ({len(days)}) ...", file=sys.stderr)
+    reset_progress()
     with ThreadPoolExecutor(args.workers) as pool:
-        results = list(pool.map(lambda d: day_catalog(session, d), days))
+        results = list(pool.map(
+            lambda d: day_catalog(d, args.timeout, len(days)), days))
+    print(file=sys.stderr)
     present = {}
     for day, (names, err) in zip(days, results):
         present[day] = names
@@ -151,14 +212,15 @@ def main() -> int:
         skip = set(absent)
         check = [t for t in wanted if t not in skip and t.date() not in bad_days]
         print(f"headers for {len(check)} pl files ...", file=sys.stderr)
+        reset_progress()
         with ThreadPoolExecutor(args.workers) as pool:
             for t, (n, err) in zip(check, pool.map(
-                    lambda t: level_count(session, t), check)):
+                    lambda t: level_count(t, args.timeout, len(check)), check)):
                 if err:
                     errors[f"{t:%Y-%m-%dT%H} levels"] = err
                 elif n < len(LEVELS):
                     short.append((t, n))
-        print(f"  short: {len(short)}", file=sys.stderr)
+        print(f"\n  short: {len(short)}", file=sys.stderr)
 
     bad = sorted(set(absent) | {t for t, _ in short})
 
