@@ -48,7 +48,12 @@ for job in "${jobs[@]}"; do
     # end date would always match and every job would read as finished.
     start=$(sed -n 's/^ *start: *//p' "$out" | head -1)
     end=$(sed -n 's/^ *end: *//p' "$out" | head -1)
-    seen=$(grep -v '^ *\(start\|end\|frequency\):' "$out" \
+    # The MARS client prefixes every line it relays with the wall-clock time it
+    # polled, so today's date sits at the start of thousands of lines. Left in,
+    # it is always the newest date in the file and every MARS build reads as
+    # finished. Strip the prefix before looking for the frontier.
+    seen=$(sed -e 's/^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9:]\{8\} //' "$out" \
+           | grep -v '^ *\(start\|end\|frequency\):' \
            | grep -oE '20[0-9]{2}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2})?' \
            | sort | tail -1)
 
@@ -74,9 +79,12 @@ for job in "${jobs[@]}"; do
     [[ -n "$zarr" && -e "$zarr" ]] && echo "  zarr  : $(du -sh "$zarr" | cut -f1)"
 
     # TMPDIR is node-local, so this has to run on the node that holds the job.
+    # One line for the node, not for the job: the caches are unlabelled temp
+    # dirs, so there is no honest way to attribute them to one job of several
+    # sharing a node. What matters is the headroom either way.
     [[ "$state" == "RUNNING" ]] && srun --jobid="$job" --overlap --quiet bash -c '
-        d=$(ls -d /tmp/tmp*/ 2>/dev/null | head -1)
-        [[ -n "$d" ]] && echo "  cache : $(du -sh "$d" | cut -f1) in $d"
+        c=$(du -sc /tmp/tmp*/ 2>/dev/null | tail -1 | cut -f1)
+        [[ -n "$c" ]] && echo "  caches: $((c/1048576))G in /tmp on $(hostname) (all jobs)"
         echo "  /tmp  : $(df -h /tmp | awk "NR==2{print \$4\" free of \"\$2}")"
     ' 2>/dev/null
 done
