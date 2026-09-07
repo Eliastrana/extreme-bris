@@ -116,14 +116,29 @@ try:
     g = zarr.open(sys.argv[1], mode="r")
     d = g["data"]
     dates = g["dates"][:]
+
+    # A state the recipe declared missing is empty on purpose. Six of year one
+    # are: 2026-09-02 has no 00Z or 06Z cycle in the archive, and 2026-01-31
+    # serves half the pressure levels the recipe asks for. Counting those as
+    # failures would report every correct build as NOT USABLE, and a check
+    # that cries wolf is a check nobody reads.
+    declared = {np.datetime64(x, "s")
+                for x in g.attrs.get("missing_dates", [])}
+
     empty = []
     for s in range(d.shape[0]):
+        if np.datetime64(dates[s], "s") in declared:
+            continue
         a = np.asarray(d[s, :, 0, ::200], dtype="float64")
         if np.isfinite(a).mean() < 0.5:
             empty.append(str(dates[s]))
+
+    expected = d.shape[0] - len(declared)
     print(f"=== shape   : {d.shape}")
     print(f"=== dates   : {len(dates)}  {dates[0]} .. {dates[-1]}")
-    print(f"=== with data: {d.shape[0] - len(empty)} of {d.shape[0]}")
+    if declared:
+        print(f"=== declared missing: {len(declared)}")
+    print(f"=== with data: {expected - len(empty)} of {expected}")
     if empty:
         print(f"=== EMPTY STATES ({len(empty)}): {empty[:8]}")
         sys.exit(3)
