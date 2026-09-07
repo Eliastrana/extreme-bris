@@ -52,7 +52,11 @@ for job in "${jobs[@]}"; do
     # polled, so today's date sits at the start of thousands of lines. Left in,
     # it is always the newest date in the file and every MARS build reads as
     # finished. Strip the prefix before looking for the frontier.
+    # Skip the recipe header the sbatch echoes. It now carries a `missing:`
+    # list, and those dates are in the future relative to the frontier: reading
+    # them as progress reported a job 33 seconds old as 98% done.
     seen=$(sed -e 's/^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9] [0-9:]\{8\} //' "$out" \
+           | sed -e '/^dates:/,/^[^ #-]/d' \
            | grep -v '^ *\(start\|end\|frequency\):' \
            | grep -oE '20[0-9]{2}-[0-9]{2}-[0-9]{2}(T[0-9]{2}:[0-9]{2}:[0-9]{2})?' \
            | sort | tail -1)
