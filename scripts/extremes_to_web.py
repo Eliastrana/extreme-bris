@@ -50,7 +50,18 @@ def main() -> int:
         rows: dict[str, float] = {}
         for p in paths:
             if not p.exists():
-                print(f"ERROR: no file at {p}", file=sys.stderr)
+                # An unmatched shell glob arrives here as a literal path with
+                # a star still in it. Saying "no file at .../meps-year*.json"
+                # sends the reader looking for a typo; the real answer is that
+                # the ranking has not been run yet.
+                if any(ch in str(p) for ch in "*?["):
+                    print(f"ERROR: nothing matched {p}\n"
+                          "The ranking has not produced these files yet. Run "
+                          "bris/slurm/find_extremes.sbatch\non each dataset "
+                          "first; it writes one JSON per dataset.",
+                          file=sys.stderr)
+                else:
+                    print(f"ERROR: no file at {p}", file=sys.stderr)
                 raise SystemExit(2)
             doc = json.loads(p.read_text())
             for d in doc.get("days", []):
