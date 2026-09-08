@@ -46,9 +46,18 @@ in an environment nobody can reconstruct.
 VERIFY THE RESULT. A patch to accumulation logic is exactly the kind of change
 that produces a dataset which loads fine and carries quietly wrong
 precipitation, so check tp against an independent source before building
-anything on top of it:
+anything on top of it. Two things do that:
 
-    scripts/check_accumulations.py <zarr>
+  * bris/slurm/build_dataset.sbatch ends by measuring what fraction of every
+    state is a finite number, and refuses to report OK when any state is
+    empty. Structure is not data: a build has passed every shape and date
+    check while being entirely NaN.
+  * scripts/check_scda_stream.py pins the date ECMWF moved the 06Z and 18Z
+    cycles out of the scda stream, which is the difference between real
+    accumulations and a build that dies on Expected 90, got 33.
+
+An earlier version of this docstring named scripts/check_accumulations.py,
+which does not exist and never did.
 """
 
 from __future__ import annotations
