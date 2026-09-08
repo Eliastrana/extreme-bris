@@ -38,7 +38,14 @@ from anemoi_patches import apply_all                      # noqa: E402
 
 
 def stored_recipe(path: Path):
-    """The recipe anemoi saved inside the dataset, or None if there is none."""
+    """The recipe anemoi saved inside the dataset, or None if there is none.
+
+    A finished dataset has none: anemoi's cleanup step removes
+    _create_yaml_config once the build completes. That is convenient rather
+    than awkward, because it means the attribute is present exactly where a
+    resume makes sense - a build that stopped partway - and absent where it
+    does not. Do not "fix" a finished dataset by putting it back.
+    """
     try:
         import zarr
 
