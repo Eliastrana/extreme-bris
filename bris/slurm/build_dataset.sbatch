@@ -36,16 +36,29 @@
 # Keep THREADS modest. thredds.met.no is a shared public service, not a private
 # endpoint, and a build that hammers it for days is a bad neighbour.
 #
-# MEMORY: ONE BUILD PER NODE. A MEPS year peaks at 56 GB resident. Slurm on
-# this cluster reports RealMemory=1 and does not track memory at all, so it
-# will happily pack several of these onto one node and let the kernel sort it
-# out. Three submitted together landed on the same 132 GB node, asked for
-# 169 GB between them, and were killed with rc=137 after 33 minutes each.
+# MEMORY SCALES WITH THREADS, AND IT IS LARGE. Each thread holds one monthly
+# group in memory until the group is written: roughly 124 states of 98
+# variables over 1,014,481 points, about 44 GB. THREADS=4 therefore peaks near
+# 180 GB, and a successful run on n001 was measured at 352 GB resident.
 #
-# Submit with --exclusive when running more than one at a time. There is no
-# scarcity to justify packing: rome16q had nine idle nodes when this happened.
+# Slurm here reports RealMemory=1 and does not track memory at all, so nothing
+# stops a build from being placed where it cannot fit. It is the kernel that
+# ends it, with rc=137 and no explanation anywhere else.
 #
-#   sbatch -p rome16q --exclusive --export=ALL,RECIPE=...,OUT=... this.sbatch
+# This was got wrong twice. Three builds on one 126 GB rome16q node died at
+# 33 minutes, which looked like co-scheduling; --exclusive was the obvious fix
+# and it changed nothing, because a single build on that node reached 127 GB
+# of the 126 GB it had. The node class was simply too small.
+#
+#   partition   node   memory
+#   rome16q     n052    126 GB   too small for THREADS=4
+#   milanq      n015   2004 GB
+#   genoaxq     n021   3023 GB
+#
+# Pick a partition with room, or lower THREADS. THREADS=1 needs about 44 GB
+# and takes roughly four times as long.
+#
+#   sbatch -p milanq --export=ALL,RECIPE=...,OUT=...,THREADS=4 this.sbatch
 
 set -uo pipefail
 
@@ -95,7 +108,16 @@ echo "=== out     : $OUT"
 echo "=== threads : $THREADS"
 # Slurm cannot enforce this, so at least record it. A build killed by the
 # kernel leaves rc=137 and no explanation anywhere else.
-echo "=== memory  : $(free -g 2>/dev/null | awk 'NR==2{print $7" GB available of "$2" GB"}') (a MEPS year peaks near 56 GB)"
+echo "=== memory  : $(free -g 2>/dev/null | awk 'NR==2{print $7" GB available of "$2" GB"}') (needs roughly 44 GB per thread)"
+# Refuse rather than spend twenty minutes finding out. Slurm will not check
+# this, and a kernel kill leaves rc=137 and nothing else to read.
+need=$(( 44 * THREADS ))
+have=$(free -g 2>/dev/null | awk 'NR==2{print $2}')
+if [[ -n "$have" && "$have" -lt "$need" ]]; then
+    echo "ERROR: this node has ${have} GB and THREADS=$THREADS needs about ${need} GB." >&2
+    echo "       Use a larger partition (milanq, genoaxq) or lower THREADS." >&2
+    exit 1
+fi
 echo "=== tmpdir  : $TMPDIR ($(df -h "$TMPDIR" | awk 'NR==2{print $4}') free)"
 echo "=== cache   : $EARTHKIT_DATA_USER_CACHE_DIRECTORY ($(du -sh "$EARTHKIT_DATA_USER_CACHE_DIRECTORY" 2>/dev/null | cut -f1) held)"
 sed -n '/^dates:/,/^$/p' "$RECIPE"
