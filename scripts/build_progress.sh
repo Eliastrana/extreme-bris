@@ -119,11 +119,17 @@ print(f"  built : {done} of {total} states  ({100*done//total}%), "
 # of order, so "9 of 13" can mean the ninth month is built or that a later
 # one overtook a stalled earlier one.
 if 0 < int(flags.sum()) < len(flags):
+    # lengths counts only states that are actually built, while the date axis
+    # keeps a slot for every declared-missing date too. Indexing the axis by a
+    # running sum of lengths therefore drifts by one slot per missing date,
+    # and labelled May as April. Walk the axis skipping the missing ones.
     dates = z["dates"][:]
+    skip = {str(x)[:19] for x in z.attrs.get("missing_dates", [])}
+    usable = [d for d in dates if str(d)[:19] not in skip]
     start, pending = 0, []
     for i, n in enumerate(lengths):
-        if not flags[i]:
-            pending.append(str(dates[start])[:7])
+        if not flags[i] and start < len(usable):
+            pending.append(str(usable[start])[:7])
         start += int(n)
     print(f"  pending: {' '.join(pending)}")
 PYEOF
