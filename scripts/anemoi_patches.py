@@ -162,6 +162,72 @@ def patch_iterate_patterns() -> str:
     return "iterate_patterns gives each URL only its own dates"
 
 
+# ECMWF retired the short cut-off stream on this date: the 06Z and 18Z cycles
+# moved from `scda` into `oper`. Verified against MARS itself, one request per
+# stream and month, asking only for a single grid box:
+#
+#   scda 18Z, April 2026     30 of 30      scda 06Z, May 2026   1-11 May
+#   scda 18Z, May 2026       1-11 May      scda 18Z, Aug 2026   nothing
+#   oper 06Z, May 2026      12-31 May      oper 18Z, May 2026  12-31 May
+#   oper 06Z, Aug 2026       31 of 31      oper 18Z, Aug 2026   31 of 31
+#
+# The two streams meet exactly, with no overlap and no gap.
+SCDA_RETIRED = 20260512
+
+
+def patch_scda_retirement() -> str:
+    """Choose the accumulation stream by date, not by time alone.
+
+    anemoi's _scda sends every 06Z and 18Z accumulation request to the `scda`
+    stream. That was right until 2026-05-12 and wrong after it, which is what
+    killed a ten-hour build: MARS answered `Expected 90, got 33` for May 2026,
+    because only the first eleven days of that month are in scda.
+
+    The failure looked like missing data and was not. Declaring those months
+    missing - the obvious reading of the error - would have thrown away four
+    months of perfectly good analysis for a stream rename.
+
+    The patch is date-aware because the archive is: requests before the
+    cutover must still go to scda, which is the only place those days exist.
+    `patch` is applied per request and each request carries one date, so this
+    can decide per date rather than per month.
+    """
+    from anemoi.datasets.create.sources import accumulations as acc
+
+    if getattr(acc._scda, "_date_aware", False):
+        return "_scda already date-aware"
+
+    def as_int(value) -> int | None:
+        """The request encodes date as year*10000 + month*100 + day."""
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            digits = value.replace("-", "")
+            return int(digits) if digits.isdigit() else None
+        for attr in ("year",):
+            if hasattr(value, attr):
+                return value.year * 10000 + value.month * 100 + value.day
+        return None
+
+    def _scda(request):
+        if request["time"] not in (6, 18, 600, 1800):
+            request["stream"] = "oper"
+            return request
+        date = as_int(request.get("date"))
+        # An unreadable date keeps the old behaviour rather than guessing.
+        if date is None:
+            request["stream"] = "scda"
+        else:
+            request["stream"] = "scda" if date < SCDA_RETIRED else "oper"
+        return request
+
+    _scda._date_aware = True
+    # KWARGS is rebuilt inside accumulations() on every call and resolves
+    # _scda from module globals, so rebinding the module attribute reaches it.
+    acc._scda = _scda
+    return f"_scda picks oper for 06Z/18Z from {SCDA_RETIRED}"
+
+
 def apply_all() -> List[str]:
     """Apply every patch. Order does not matter; each is independent."""
     return [
@@ -169,4 +235,5 @@ def apply_all() -> List[str]:
         patch_fix_provenance(),
         patch_accumulations(),
         patch_iterate_patterns(),
+        patch_scda_retirement(),
     ]
