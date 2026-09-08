@@ -35,6 +35,17 @@
 #
 # Keep THREADS modest. thredds.met.no is a shared public service, not a private
 # endpoint, and a build that hammers it for days is a bad neighbour.
+#
+# MEMORY: ONE BUILD PER NODE. A MEPS year peaks at 56 GB resident. Slurm on
+# this cluster reports RealMemory=1 and does not track memory at all, so it
+# will happily pack several of these onto one node and let the kernel sort it
+# out. Three submitted together landed on the same 132 GB node, asked for
+# 169 GB between them, and were killed with rc=137 after 33 minutes each.
+#
+# Submit with --exclusive when running more than one at a time. There is no
+# scarcity to justify packing: rome16q had nine idle nodes when this happened.
+#
+#   sbatch -p rome16q --exclusive --export=ALL,RECIPE=...,OUT=... this.sbatch
 
 set -uo pipefail
 
@@ -82,6 +93,9 @@ echo "=== node    : $(hostname)"
 echo "=== recipe  : $RECIPE"
 echo "=== out     : $OUT"
 echo "=== threads : $THREADS"
+# Slurm cannot enforce this, so at least record it. A build killed by the
+# kernel leaves rc=137 and no explanation anywhere else.
+echo "=== memory  : $(free -g 2>/dev/null | awk 'NR==2{print $7" GB available of "$2" GB"}') (a MEPS year peaks near 56 GB)"
 echo "=== tmpdir  : $TMPDIR ($(df -h "$TMPDIR" | awk 'NR==2{print $4}') free)"
 echo "=== cache   : $EARTHKIT_DATA_USER_CACHE_DIRECTORY ($(du -sh "$EARTHKIT_DATA_USER_CACHE_DIRECTORY" 2>/dev/null | cut -f1) held)"
 sed -n '/^dates:/,/^$/p' "$RECIPE"
