@@ -69,13 +69,10 @@ input:
               - air_temperature_2m
               - cloud_area_fraction
               - high_type_cloud_area_fraction
-              - integral_of_surface_downwelling_longwave_flux_in_air_wrt_time
-              - integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time
               - land_area_fraction
               - low_type_cloud_area_fraction
               - lwe_thickness_of_atmosphere_mass_content_of_water_vapor
               - medium_type_cloud_area_fraction
-              - precipitation_amount_acc
               - relative_humidity_2m
               - surface_air_pressure
               - surface_geopotential
@@ -95,13 +92,41 @@ input:
               medium_type_cloud_area_fraction: mcc
               low_type_cloud_area_fraction: lcc
               lwe_thickness_of_atmosphere_mass_content_of_water_vapor: tcw
-              precipitation_amount_acc: tp
-              integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time: ssrd
-              integral_of_surface_downwelling_longwave_flux_in_air_wrt_time: strd
               x_wind_10m: 10u
               y_wind_10m: 10v
               # Holds RELATIVE HUMIDITY until postprocess_meps.py converts it.
               relative_humidity_2m: 2d
+
+    # ---- accumulations, from the PREVIOUS cycle at step 6 -------------------
+    # precipitation_amount_acc accumulates from the start of a model run, so at
+    # step 0 it is zero by definition. Reading it from the state's own cycle
+    # therefore produced a field that was present, finite, and identically zero
+    # for three whole years - 756 GB with no precipitation in it, which every
+    # existing check passed because zero is a perfectly good number.
+    #
+    # The six-hour accumulation valid at T is step 6 of the cycle based at
+    # T-6h, so this entry points one cycle back with strftimedelta and lets the
+    # source find valid time T inside that file. Same field, same window, no
+    # differencing.
+    #
+    # This is also why the archive's first cycle cannot be the first state: a
+    # state at 2023-10-01T00 would need the 2023-09-30T18 cycle, and the
+    # archive begins on 1 October. year3 starts six hours later for that reason.
+    - pipe:
+        - opendap:
+            url: https://thredds.met.no/thredds/dodsC/meps25epsarchive/{date:strftimedelta(-6h;%Y)}/{date:strftimedelta(-6h;%m)}/{date:strftimedelta(-6h;%d)}/meps_det_sfc_{date:strftimedelta(-6h;%Y%m%d)}T{date:strftimedelta(-6h;%H)}Z.ncml
+            options:
+              engine: pydap
+            variable:
+              - precipitation_amount_acc
+              - integral_of_surface_downwelling_longwave_flux_in_air_wrt_time
+              - integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time
+
+        - rename:
+            param:
+              precipitation_amount_acc: tp
+              integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time: ssrd
+              integral_of_surface_downwelling_longwave_flux_in_air_wrt_time: strd
 
     # ---- pressure levels ---------------------------------------------------
     - pipe:

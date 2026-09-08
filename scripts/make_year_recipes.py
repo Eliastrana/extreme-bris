@@ -38,7 +38,10 @@ CHUNKS = [
     ("year1", dt.datetime(2025, 9, 8, 0), dt.datetime(2026, 9, 6, 18)),
     ("year2", dt.datetime(2024, 9, 8, 0), dt.datetime(2025, 9, 7, 18)),
     # The archive begins 2023-10-01, so the oldest chunk is short by two months.
-    ("year3", dt.datetime(2023, 10, 1, 0), dt.datetime(2024, 9, 7, 18)),
+    # 06, not 00. Precipitation for a state comes from the cycle six hours
+    # earlier, and 2023-09-30 is not in the archive: the first state of the
+    # archive cannot be the first state of a dataset.
+    ("year3", dt.datetime(2023, 10, 1, 6), dt.datetime(2024, 9, 7, 18)),
 ]
 
 ARCHIVE_START = dt.datetime(2023, 10, 1, 0)
