@@ -101,18 +101,45 @@ echo "=== cache   : $EARTHKIT_DATA_USER_CACHE_DIRECTORY ($(du -sh "$EARTHKIT_DAT
 sed -n '/^dates:/,/^$/p' "$RECIPE"
 echo
 
-# A half-written zarr from a previous attempt is not a resumable state: it has
+# TRY TO CONTINUE BEFORE THROWING AWAY. anemoi records which monthly groups
+# are finished inside the dataset and its load step skips them, but nothing
+# used that: this line deleted the target before every build, so a failure at
+# hour four cost four hours. It happened twice.
+#
+# anemoi_resume.py continues only when the recipe stored in the dataset is
+# identical to the one being submitted, and exits 4 otherwise - including when
+# nothing is finished yet, where a full build costs no more. Any 4 falls
+# through to the wipe below, so the safe path is also the default.
+resumed=0
+start=$(date +%s)
+if [[ -e "$OUT" && "${RESUME:-1}" != "0" ]]; then
+    echo "=== trying to resume $OUT"
+    "$DATA_ENV/bin/python" "$REPO_DIR/scripts/anemoi_resume.py" \
+        "$RECIPE" "$OUT" --threads "$THREADS"
+    rr=$?
+    if [[ $rr -eq 0 ]]; then
+        resumed=1
+        rc=0
+    elif [[ $rr -ne 4 ]]; then
+        echo "=== resume failed with rc=$rr; not falling back to a wipe" >&2
+        exit $rr
+    fi
+fi
+
+# A half-written zarr that cannot be resumed is not a starting point: it has
 # the right shape and dates with nothing behind them, which is precisely the
-# failure this week's finite check exists to catch.
+# failure the finite check exists to catch.
+if [[ $resumed -eq 0 ]]; then
 [[ -e "$OUT" ]] && { echo "removing existing $OUT"; rm -rf "$OUT"; }
 
-start=$(date +%s)
-# The wrapper carries two patches the build cannot complete without: numpy
-# integers made JSON-serialisable, and iterate_patterns handing each resolved
-# URL only its own dates. See scripts/anemoi_create.py.
+# The wrapper carries the patches the build cannot complete without: numpy
+# integers made JSON-serialisable, iterate_patterns handing each resolved URL
+# only its own dates, and the accumulation stream picked by date. See
+# scripts/anemoi_patches.py.
 "$DATA_ENV/bin/python" "$REPO_DIR/scripts/anemoi_create.py" \
     "$RECIPE" "$OUT" --threads "$THREADS"
 rc=$?
+fi
 elapsed=$(( $(date +%s) - start ))
 printf '\n=== build finished rc=%d in %02d:%02d:%02d\n' \
     "$rc" $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60))
