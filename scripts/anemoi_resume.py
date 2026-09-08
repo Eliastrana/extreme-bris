@@ -54,6 +54,48 @@ def stored_recipe(path: Path):
         return None
 
 
+def norm_dates(block):
+    """The dates block with every timestamp reduced to a datetime.
+
+    anemoi rewrites what it stores: `2024-09-08 00:00:00` on the way in comes
+    back as `2024-09-08T00:00:00`. Comparing the strings therefore always
+    fails, which is how the first version of this refused every resume it was
+    ever offered - including the one it was written for, a build that lost
+    four hours to a read timeout with ten of thirteen groups already done.
+    """
+    import datetime as dt
+
+    def one(v):
+        if isinstance(v, str):
+            try:
+                return dt.datetime.fromisoformat(v)
+            except ValueError:
+                return v
+        if isinstance(v, list):
+            return [one(x) for x in v]
+        return v
+
+    return {k: one(v) for k, v in (block or {}).items()
+            if k in ("start", "end", "frequency", "missing")}
+
+
+def same_recipe(stored, wanted) -> bool:
+    """Do these two recipes build the same dataset from the same places?
+
+    Not a whole-structure comparison. anemoi stores a normalised copy with its
+    own defaults filled in - attribution, licence, chunking, order_by and more
+    - so the stored recipe never equals the file even when nothing changed.
+    What matters is what would be rebuilt and where it would come from: the
+    dates and the input tree. Everything else is presentation or a default
+    that does not change a single value in the array.
+    """
+    if not isinstance(stored, dict) or not isinstance(wanted, dict):
+        return False
+    if stored.get("input") != wanted.get("input"):
+        return False
+    return norm_dates(stored.get("dates")) == norm_dates(wanted.get("dates"))
+
+
 def group_status(path: Path):
     """(done, total) monthly groups, or None when the dataset has no _build."""
     try:
@@ -100,10 +142,7 @@ def main() -> int:
     if stored is None:
         print("dataset has no stored recipe; refusing to resume", file=sys.stderr)
         return 4
-    # anemoi stores the whole recipe under _create_yaml_config. Compare the
-    # whole thing: no difference is safely ignorable here, because the load
-    # step reads its config from the dataset rather than from the file.
-    if stored != wanted:
+    if not same_recipe(stored, wanted):
         print("stored recipe differs from the one submitted; refusing to "
               "resume.\nThe load step reads its config from the dataset, so "
               "resuming would\nrebuild the missing groups from the old "
