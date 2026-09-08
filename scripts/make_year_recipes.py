@@ -114,13 +114,31 @@ def main() -> int:
 
     # Only the dates inside a chunk belong in that chunk's recipe, so read the
     # whole set once and filter per chunk rather than trusting file names.
-    missing_all: list[dt.datetime] = []
+    scanned: list[dt.datetime] = []
     for f in args.missing:
         if not f.exists():
             print(f"ERROR: no missing-dates file at {f}", file=sys.stderr)
             return 1
         for line in f.read_text().split():
-            missing_all.append(dt.datetime.fromisoformat(line))
+            scanned.append(dt.datetime.fromisoformat(line))
+
+    # AN ABSENT CYCLE NOW COSTS TWO STATES, NOT ONE. Precipitation for the
+    # state at T is read from the cycle at T-6h, so a cycle that is not in the
+    # archive breaks its own state and the next one too. Both builds that
+    # failed after that recipe change died exactly here: year one asked for
+    # meps_det_sfc_20260902T06Z, a cycle already declared missing, because the
+    # state at 12Z needed it for rain.
+    #
+    # The scan cannot tell the two apart in its output, and a state whose
+    # pressure levels are merely thin still has a usable surface file for the
+    # next state's rain. Marking that one missing as well over-declares by
+    # four states of 4287, which is cheaper than another five-hour failure.
+    missing_all = sorted(set(scanned) | {d + dt.timedelta(hours=6)
+                                         for d in scanned})
+    extra = len(missing_all) - len(set(scanned))
+    if extra:
+        print(f"declaring {extra} extra states: the one after each hole, "
+              f"whose precipitation would come from it", file=sys.stderr)
 
     if not args.meps_base.exists():
         print(f"ERROR: no MEPS recipe at {args.meps_base}", file=sys.stderr)
