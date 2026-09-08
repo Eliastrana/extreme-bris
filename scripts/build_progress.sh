@@ -95,14 +95,37 @@ for job in "${jobs[@]}"; do
 import sys
 import zarr
 try:
-    b = zarr.open(sys.argv[1], mode="r")["_build"]
-    flags, lengths = b["flags"][:], b["lengths"][:]
-    done = int(sum(int(n) for f, n in zip(flags, lengths) if f))
-    total = int(sum(int(n) for n in lengths))
-    print(f"  built : {done} of {total} states  ({100*done//total}%), "
-          f"{int(flags.sum())} of {len(flags)} groups")
+    z = zarr.open(sys.argv[1], mode="r")
 except Exception as exc:
-    print(f"  built : unreadable ({type(exc).__name__})")
+    print(f"  built : cannot open ({type(exc).__name__})")
+    raise SystemExit(0)
+
+# A dataset with no _build group has not finished init. That is the normal
+# state for the first minutes of a MARS build, where init issues one small
+# request and then waits in ECMWF's queue like any other. Reporting it as an
+# error sent me looking for a fault that was not there.
+if "_build" not in z:
+    print("  built : not initialised yet (init still running)")
+    raise SystemExit(0)
+
+b = z["_build"]
+flags, lengths = b["flags"][:], b["lengths"][:]
+done = int(sum(int(n) for f, n in zip(flags, lengths) if f))
+total = int(sum(int(n) for n in lengths))
+print(f"  built : {done} of {total} states  ({100*done//total}%), "
+      f"{int(flags.sum())} of {len(flags)} groups")
+
+# Which groups are done matters more than how many. Four threads finish out
+# of order, so "9 of 13" can mean the ninth month is built or that a later
+# one overtook a stalled earlier one.
+if 0 < int(flags.sum()) < len(flags):
+    dates = z["dates"][:]
+    start, pending = 0, []
+    for i, n in enumerate(lengths):
+        if not flags[i]:
+            pending.append(str(dates[start])[:7])
+        start += int(n)
+    print(f"  pending: {' '.join(pending)}")
 PYEOF
 
     # TMPDIR is node-local, so this has to run on the node that holds the job.
