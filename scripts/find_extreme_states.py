@@ -185,8 +185,15 @@ def main() -> int:
     scale, how = unit_scale(raw_max, args.units)
     print(f"units: {how}", file=sys.stderr)
 
+    # Convert once, here, and let nothing downstream carry a raw value. The
+    # first version scaled the state being tested but not the percentile it
+    # was tested against, so every comparison was off by a factor of a
+    # thousand and 72% of the domain came out "above its own 99th percentile".
+    # A number that impossible is the only reason it was caught.
+    sub *= scale
+
     # ---- percentile field, per point --------------------------------------
-    wet = sub * scale >= args.wet_mm
+    wet = sub >= args.wet_mm
     n_wet = wet.sum(axis=0)
     thresh = np.full(sub_n, np.nan, dtype="float32")
     enough = n_wet >= args.min_wet
@@ -202,7 +209,7 @@ def main() -> int:
         if s["missing"]:
             records.append({"date": s["date"], "missing": True})
             continue
-        row = sub[i] * scale
+        row = sub[i]
         exceed = np.zeros(sub_n, dtype=bool)
         np.greater(row, thresh, out=exceed, where=enough & np.isfinite(row))
         counts = np.array(s["raw_hist"], dtype="float64")
