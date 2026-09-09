@@ -44,9 +44,13 @@ import math
 import sys
 from pathlib import Path
 
-import numpy as np
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _venv
+
+_venv.ensure("zarr", "numpy")
+
+import numpy as np  # noqa: E402
+
 from postprocess_meps import Stats  # noqa: E402
 
 A, B = 17.625, 243.04

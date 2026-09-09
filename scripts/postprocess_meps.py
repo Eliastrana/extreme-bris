@@ -39,7 +39,12 @@ import argparse
 import sys
 from pathlib import Path
 
-import numpy as np
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _venv
+
+_venv.ensure("zarr", "numpy")
+
+import numpy as np  # noqa: E402
 
 LEVELS = (50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000)
 WIND_PAIRS = [("10u", "10v")] + [(f"u_{l}", f"v_{l}") for l in LEVELS]
