@@ -18,25 +18,36 @@ skipped:
             formula expecting percent reads it as 0.82% humidity and returns a
             dewpoint tens of degrees too low, which is plausible-looking and
             wrong.
-  w         holds m/s; ECMWF w is Pa/s, which differs by -rho*g — an order of
+  w         holds m/s; ECMWF w is Pa/s, which differs by -rho*g, an order of
             magnitude and a sign
 
-    ~/bris-data-env/bin/python scripts/postprocess_meps.py <dataset> --dry-run
+    scripts/postprocess_meps.py <dataset> --dry-run
+    sbatch bris/slurm/postprocess.sbatch <dataset>
 
-Idempotency is NOT checked: running it twice rotates twice. It writes a marker
-into the dataset attributes and refuses to run again unless --force is given.
+ONE PASS PER STATE, NOT ONE PER VARIABLE. The data is chunked as one state by
+all 98 variables, roughly 400 MB compressed as a single blob. Zarr cannot write
+part of a chunk, so assigning one variable of one state decompresses the whole
+chunk, patches four megabytes of it, and recompresses the whole thing. The
+first version of this script looped over variables and then over states, which
+did that forty times per state and ran at a few megabytes a second: two
+variables in one hour and forty-five minutes, or well over a day per file.
 
-IT RECORDS PROGRESS PER VARIABLE, AND CAN RESUME. The marker used to be
-written only at the very end. A job killed at sixty percent therefore left a
-dataset that was partly converted and looked untouched, and the next run would
-have rotated and converted those variables a second time. On a quarter of a
-terabyte with no backup, that is irreversible. Each variable is now recorded as
-it completes, together with its own statistics, and a resumed run skips what is
-already done.
+So the loops are the other way round. Each state is read once, every conversion
+is applied to it in memory, and it is written once. Same arithmetic, one
+fortieth of the compression work.
 
-IT ALSO REWRITES THE STATISTICS. An earlier version changed the data and left
-the mean, stdev, minimum and maximum arrays describing the values that used to
-be there. Normalisation reads those arrays, not the data, so a dataset could be
+IT RECORDS PROGRESS AND CAN RESUME. Converting a variable twice rotates twice
+or subtracts a constant twice, and on a quarter of a terabyte with no backup
+there is no way back. Progress is written to the dataset attributes after every
+state, so a job that hits its walltime can simply be resubmitted. Where the
+humidity column is among the pending conversions it also serves as a per-state
+witness: relative humidity and a dewpoint in kelvin are not confusable, so the
+narrow window between writing a state and recording it cannot cause a state to
+be converted twice.
+
+IT REWRITES THE STATISTICS. An earlier version changed the data and left the
+mean, stdev, minimum and maximum arrays describing the values that used to be
+there. Normalisation reads those arrays, not the data, so a dataset could be
 converted correctly and still be normalised as though it had not been, with
 nothing on screen to say so.
 """
@@ -44,6 +55,8 @@ nothing on screen to say so.
 from __future__ import annotations
 
 import argparse
+import datetime
+import json
 import sys
 from pathlib import Path
 
@@ -58,14 +71,20 @@ LEVELS = (50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000)
 WIND_PAIRS = [("10u", "10v")] + [(f"u_{l}", f"v_{l}") for l in LEVELS]
 MARKER = "bris_postprocessed"
 PROGRESS = "bris_postprocess_done"
+PARTIAL = "bris_postprocess_partial"
+
+R_D = 287.05        # J/(kg K)
+G = 9.80665         # m/s2
 
 
 class Stats:
     """Running mean, spread and extremes for the variables this script edits.
 
     Accumulated while the conversions stream through, so no extra pass over a
-    quarter-terabyte is needed. Only touched variables are rewritten; the rest
-    of the statistics arrays are left exactly as built.
+    quarter of a terabyte is needed. Only touched variables are rewritten; the
+    rest of the statistics arrays are left exactly as built.
+
+    It serialises, because a resumed run must not start its averages over.
     """
 
     def __init__(self) -> None:
@@ -79,40 +98,37 @@ class Stats:
         v = v[good]
         slot = self.acc.get(index)
         if slot is None:
-            self.acc[index] = [v.size, v.sum(), float((v ** 2).sum()),
+            self.acc[index] = [int(v.size), float(v.sum()), float((v ** 2).sum()),
                                float(v.min()), float(v.max())]
             return
-        slot[0] += v.size
-        slot[1] += v.sum()
+        slot[0] += int(v.size)
+        slot[1] += float(v.sum())
         slot[2] += float((v ** 2).sum())
         slot[3] = min(slot[3], float(v.min()))
         slot[4] = max(slot[4], float(v.max()))
 
-    def write(self, z, names: list[str], only: int | None = None) -> None:
-        indices = sorted(self.acc) if only is None else [only]
-        for index in indices:
-            if index not in self.acc:
-                continue
+    def dump(self) -> str:
+        return json.dumps({str(k): v for k, v in self.acc.items()})
+
+    def load(self, blob: str) -> None:
+        self.acc = {int(k): list(v) for k, v in json.loads(blob).items()}
+
+    def write(self, z, names: list[str]) -> None:
+        for index in sorted(self.acc):
             n, total, squares, lo, hi = self.acc[index]
             mean = total / n
             var = max(squares / n - mean * mean, 0.0)
-            new = {"mean": mean, "stdev": var ** 0.5,
-                   "minimum": lo, "maximum": hi}
+            new = {"mean": mean, "stdev": var ** 0.5, "minimum": lo, "maximum": hi}
             for key, value in new.items():
-                if key not in z:
-                    continue
-                z[key][index] = value
-            print(f"    statistics {names[index]:8s} "
-                  f"mean {new['mean']:12.6g}  stdev {new['stdev']:12.6g}  "
-                  f"range {new['minimum']:.6g} .. {new['maximum']:.6g}")
+                if key in z:
+                    z[key][index] = value
             # anemoi keeps the raw sums alongside the derived values in some
             # builds; leaving them stale would make any recomputation disagree.
             for key, value in (("sums", total), ("squares", squares)):
                 if key in z:
                     z[key][index] = value
-
-R_D = 287.05        # J/(kg K)
-G = 9.80665         # m/s2
+            print(f"  {names[index]:8s} mean {mean:13.6g}  stdev {new['stdev']:12.6g}"
+                  f"  range {lo:.6g} .. {hi:.6g}")
 
 
 def rotation_angle(lat, lon, nx, ny):
@@ -167,6 +183,7 @@ def main() -> int:
     ap.add_argument("--ny", type=int, default=1069)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--force", action="store_true", help="run even if already marked")
+    ap.add_argument("--report-every", type=int, default=50)
     args = ap.parse_args()
 
     import zarr
@@ -174,128 +191,138 @@ def main() -> int:
     z = zarr.open(str(args.dataset), mode="r" if args.dry_run else "r+")
     if z.attrs.get(MARKER) and not args.force:
         print(f"ERROR: already post-processed ({z.attrs[MARKER]}).", file=sys.stderr)
-        print("Rotating or converting twice is worse than not at all. Use --force "
-              "only if you know the previous run did not complete.", file=sys.stderr)
+        print("Converting twice is worse than not at all. Use --force only if "
+              "you know the previous run did not complete.", file=sys.stderr)
         return 1
 
     names = list(z.attrs["variables"])
-    data = z["data"]
     idx = {n: i for i, n in enumerate(names)}
+    data = z["data"]
     nt = data.shape[0]
 
-    # Variables converted by an earlier run of this script that did not reach
-    # the end. Converting one of them again would rotate twice or subtract
-    # ln(100) twice, and there is no way back from that.
-    # A dry run reads one state, not all of them. It exists to check the
-    # rotation angle and the humidity scale before committing to a pass over a
-    # quarter of a terabyte, and a preflight that costs as much as the flight
-    # does not get run.
-    states = range(1) if args.dry_run else range(nt)
-
+    # ---- what is left to do -------------------------------------------------
     done = set(z.attrs.get(PROGRESS, []))
+    pairs = [(u, v) for u, v in WIND_PAIRS
+             if u in idx and v in idx and not (u in done and v in done)]
+    do_2d = "2d" in idx and "2t" in idx and "2d" not in done
+    levels = [l for l in LEVELS
+              if f"w_{l}" in idx and f"t_{l}" in idx and f"w_{l}" not in done]
+
+    pending = [n for uv in pairs for n in uv]
+    pending += ["2d"] if do_2d else []
+    pending += [f"w_{l}" for l in levels]
+    if not pending:
+        print("Nothing left to convert.")
+        return 0
     if done:
-        print(f"resuming: {len(done)} variable(s) already converted "
-              f"({', '.join(sorted(done))})\n")
+        print(f"{len(done)} variable(s) already converted: {', '.join(sorted(done))}")
+    print(f"{len(pending)} to go: {', '.join(pending)}\n")
 
-    def finish(*converted: str) -> None:
-        """Record variables as done, with their statistics, before moving on.
+    # ---- resume position ----------------------------------------------------
+    stats = Stats()
+    first_state = 0
+    partial = z.attrs.get(PARTIAL)
+    if partial:
+        if sorted(partial["variables"]) != sorted(pending):
+            print("ERROR: the interrupted run was converting a different set of "
+                  "variables than this one would.\n"
+                  f"  interrupted: {', '.join(sorted(partial['variables']))}\n"
+                  f"  this run   : {', '.join(sorted(pending))}\n"
+                  "Resuming would leave the two sets converted over different "
+                  "ranges of states, which nothing downstream could detect.",
+                  file=sys.stderr)
+            return 1
+        first_state = int(partial["states_done"])
+        stats.load(partial["stats"])
+        print(f"resuming at state {first_state} of {nt}\n")
 
-        Written per variable rather than per run so that an interrupted job
-        leaves a dataset whose state is known rather than one that merely
-        looks untouched.
-        """
-        if args.dry_run:
-            return
-        for name in converted:
-            stats.write(z, names, only=idx[name])
-            done.add(name)
-        z.attrs[PROGRESS] = sorted(done)
-
-    # --- winds ---------------------------------------------------------------
+    # ---- the rotation, computed once ----------------------------------------
     lat, lon = np.asarray(z["latitudes"]), np.asarray(z["longitudes"])
     if lat.size != args.nx * args.ny:
         print(f"ERROR: {lat.size:,} points is not {args.nx}x{args.ny}", file=sys.stderr)
         return 1
-    stats = Stats()
     ang = rotation_angle(lat, lon, args.nx, args.ny)
     print(f"rotation angle: {np.degrees(ang.min()):.2f} .. {np.degrees(ang.max()):.2f} deg")
     print("  a Lambert grid over the Nordics should span roughly -30 to +30;")
-    print("  a near-zero range means the angle was not recovered.\n")
+    print("  a near-zero range means the angle was not recovered.")
     cos_a, sin_a = np.cos(ang), np.sin(ang)
 
-    for un, vn in WIND_PAIRS:
-        if un not in idx or vn not in idx:
-            continue
-        if un in done and vn in done:
-            print(f"  {un}/{vn} already rotated; skipping")
-            continue
-        for t in states:
-            u = np.asarray(data[t, idx[un], 0, :], dtype="float64")
-            v = np.asarray(data[t, idx[vn], 0, :], dtype="float64")
-            ue, ve = u * cos_a - v * sin_a, u * sin_a + v * cos_a
-            drift = float(np.abs(np.hypot(u, v) - np.hypot(ue, ve)).max())
-            stats.note(idx[un], ue)
-            stats.note(idx[vn], ve)
-            if not args.dry_run:
-                data[t, idx[un], 0, :] = ue.astype(data.dtype)
-                data[t, idx[vn], 0, :] = ve.astype(data.dtype)
-        print(f"  rotated {un}/{vn}  (speed drift {drift:.2e}, must be ~0)")
-        finish(un, vn)
-
-    # --- dewpoint ------------------------------------------------------------
-    print()
-    if "2d" in done:
-        print("  2d already converted; skipping")
-    elif "2d" in idx and "2t" in idx:
-        # Percent or fraction, decided from the data. The stored maximum is
-        # already the answer and costs nothing to read.
-        stored_max = float(z["maximum"][idx["2d"]])
-        scale = rh_scale(stored_max)
-        print(f"  2d: stored maximum {stored_max:g}, so it holds "
+    # ---- the humidity scale, read from the data, not the statistics ---------
+    scale = 1.0
+    if do_2d:
+        sample = np.asarray(data[first_state, idx["2d"], 0, :], dtype="float64")
+        scale = rh_scale(float(np.nanmax(sample)))
+        print(f"\nhumidity: maximum {np.nanmax(sample):g}, so it holds "
               f"{'a fraction' if scale == 100.0 else 'percent'}; "
               f"multiplying by {scale:g}")
-        bad = 0
-        for t in states:
-            rh = np.asarray(data[t, idx["2d"], 0, :], dtype="float64") * scale
-            t2 = data[t, idx["2t"], 0, :]
-            td = rh_to_dewpoint(rh, t2)
-            bad += int((td > np.asarray(t2, dtype="float64") + 0.5).sum())
+
+    states = range(first_state, first_state + 1) if args.dry_run \
+        else range(first_state, nt)
+    above = 0
+    drift = 0.0
+
+    print(f"\n=== converting {len(states)} state(s)")
+    started = datetime.datetime.now()
+    for si, t in enumerate(states):
+        block = data[t]                       # (nvar, 1, npoints), one chunk
+        get = lambda n: np.asarray(block[idx[n], 0, :], dtype="float64")  # noqa: E731
+
+        # A dewpoint in kelvin and a relative humidity cannot be mistaken for
+        # each other, so where 2d is pending it says whether this state has
+        # already been through. That closes the gap between writing a state
+        # and recording it.
+        if do_2d and float(np.nanmax(get("2d"))) > 1.5:
+            print(f"  state {t} already converted; skipping")
+            continue
+
+        for un, vn in pairs:
+            u, v = get(un), get(vn)
+            ue, ve = u * cos_a - v * sin_a, u * sin_a + v * cos_a
+            drift = max(drift, float(np.abs(np.hypot(u, v) - np.hypot(ue, ve)).max()))
+            block[idx[un], 0, :] = ue.astype(block.dtype)
+            block[idx[vn], 0, :] = ve.astype(block.dtype)
+            stats.note(idx[un], ue)
+            stats.note(idx[vn], ve)
+
+        if do_2d:
+            t2 = get("2t")
+            td = rh_to_dewpoint(get("2d") * scale, t2)
+            above += int(np.nansum(td > t2 + 0.5))
+            block[idx["2d"], 0, :] = td.astype(block.dtype)
             stats.note(idx["2d"], td)
-            if not args.dry_run:
-                data[t, idx["2d"], 0, :] = td.astype(data.dtype)
-        print(f"  2d: relative humidity -> dewpoint  "
-              f"({np.nanmin(td):.1f}..{np.nanmax(td):.1f} K, {bad} points above 2t)")
-        if bad:
-            print("     dewpoint above temperature is unphysical — check the input units")
-        finish("2d")
-    else:
-        print("  2d or 2t missing; skipping dewpoint")
 
-    # --- omega ---------------------------------------------------------------
-    print()
-    for lev in LEVELS:
-        wn, tn = f"w_{lev}", f"t_{lev}"
-        if wn not in idx or tn not in idx:
-            continue
-        if wn in done:
-            print(f"  {wn} already converted; skipping")
-            continue
-        for t in states:
-            wz = data[t, idx[wn], 0, :]
-            tk = data[t, idx[tn], 0, :]
-            om = wz_to_omega(wz, tk, lev * 100.0)
-            stats.note(idx[wn], om)
-            if not args.dry_run:
-                data[t, idx[wn], 0, :] = om.astype(data.dtype)
-        print(f"  w_{lev}: m/s -> Pa/s  ({np.nanmin(om):.3f}..{np.nanmax(om):.3f})")
-        finish(wn)
+        for lev in levels:
+            om = wz_to_omega(get(f"w_{lev}"), get(f"t_{lev}"), lev * 100.0)
+            block[idx[f"w_{lev}"], 0, :] = om.astype(block.dtype)
+            stats.note(idx[f"w_{lev}"], om)
 
-    if not args.dry_run:
-        import datetime
-        z.attrs[MARKER] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        print(f"\nmarked as post-processed")
-    else:
-        print("\nDry run — nothing written.")
+        if not args.dry_run:
+            data[t] = block
+            z.attrs[PARTIAL] = {"variables": pending, "states_done": t + 1,
+                                "stats": stats.dump()}
+
+        if si % args.report_every == 0 or t == nt - 1:
+            per = (datetime.datetime.now() - started).total_seconds() / (si + 1)
+            left = datetime.timedelta(seconds=int(per * (len(states) - si - 1)))
+            print(f"  state {t + 1}/{nt}  {per:.2f} s each  about {left} left")
+
+    print(f"\nwind speed drift {drift:.2e}, must be ~0")
+    if do_2d:
+        print(f"{above} points ended with a dewpoint above their temperature")
+        if above:
+            print("  that is unphysical; a handful from rounding is expected, a "
+                  "large share means the humidity scale was read wrong")
+
+    if args.dry_run:
+        print("\nDry run on one state. Nothing written.")
+        return 0
+
+    print("\n=== rewriting statistics for the variables that changed")
+    stats.write(z, names)
+    z.attrs[PROGRESS] = sorted(done | set(pending))
+    del z.attrs[PARTIAL]
+    z.attrs[MARKER] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    print("\nmarked as post-processed")
     return 0
 
 
