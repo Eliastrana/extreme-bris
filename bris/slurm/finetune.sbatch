@@ -15,6 +15,18 @@
 #   sbatch bris/slurm/finetune.sbatch finetune        # control
 #   sbatch bris/slurm/finetune.sbatch finetune_tail   # treatment
 #
+# Anything after the arm name is passed to anemoi as an override, which is how
+# to probe one of these cheaply before committing two days to it. The tail arm
+# is the one to probe, because it inherits everything the control arm has and
+# adds a loss class that has never been instantiated:
+#
+#   sbatch -t 02:00:00 bris/slurm/finetune.sbatch finetune_tail \
+#       training.max_steps=2 dataloader.limit_batches.training=2 \
+#       dataloader.limit_batches.validation=1
+#
+# A run with overrides is not the run these configs describe, so the check for
+# written weights below drops to a warning for it.
+#
 # RUN THESE TWO FIRST, ON THE LOGIN NODE. Both take seconds and both catch
 # things that otherwise surface after the queue wait:
 #
@@ -32,6 +44,7 @@
 set -uo pipefail
 
 CONFIG_NAME="${1:-${CONFIG_NAME:-finetune}}"
+EXTRA=("${@:2}")
 
 REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
 [[ -f "$REPO_DIR/scripts/env.sh" ]] && source "$REPO_DIR/scripts/env.sh"
@@ -60,6 +73,7 @@ if grep -qE '^\s*tail_threshold:\s*null\s*$' "$CONFIG"; then
 fi
 
 echo "=== arm     : $CONFIG_NAME"
+[[ ${#EXTRA[@]} -gt 0 ]] && echo "=== override: ${EXTRA[*]}"
 echo "=== node    : $(hostname)"
 echo "=== memory  : $(free -g | awk 'NR==2{print $7" GB available of "$2" GB"}')"
 
@@ -102,7 +116,8 @@ start=$(date +%s)
     --config-dir "$CONFIG_DIR" --config-name "$CONFIG_NAME" \
     hardware.num_gpus_per_node="$NGPU" \
     hardware.num_gpus_per_ensemble="$NGPU" \
-    hardware.num_gpus_per_model=1
+    hardware.num_gpus_per_model=1 \
+    "${EXTRA[@]}"
 rc=$?
 elapsed=$(( $(date +%s) - start ))
 printf '\n=== finished rc=%d in %02d:%02d:%02d\n' \
@@ -115,8 +130,12 @@ ckpt_dir="$HOME/bris-runs/train/checkpoint"
 n_ckpt=$(find "$ckpt_dir" -name '*.ckpt' -newermt "@$start" 2>/dev/null | wc -l)
 echo "=== wrote $n_ckpt checkpoint(s) under $ckpt_dir"
 if [[ $rc -eq 0 && $n_ckpt -eq 0 ]]; then
-    echo "=== FINISHED WITH NOTHING SAVED - check diagnostics.checkpoint" >&2
-    exit 3
+    if [[ ${#EXTRA[@]} -gt 0 ]]; then
+        echo "=== nothing saved, which is expected for an overridden run"
+    else
+        echo "=== FINISHED WITH NOTHING SAVED - check diagnostics.checkpoint" >&2
+        exit 3
+    fi
 fi
 
 [[ $rc -eq 0 ]] && echo "=== $CONFIG_NAME DONE" \
