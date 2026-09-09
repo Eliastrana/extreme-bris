@@ -12,7 +12,12 @@ skipped:
 
   winds     x_wind/y_wind are aligned with the Lambert grid; the model expects
             earth-relative u/v
-  2d        holds relative humidity in percent; must become dewpoint in kelvin
+  2d        holds relative humidity; must become dewpoint in kelvin. The
+            OPeNDAP source serves it as a FRACTION, not percent, so the scale
+            is detected from the data rather than assumed. Feeding 0.82 to a
+            formula expecting percent reads it as 0.82% humidity and returns a
+            dewpoint tens of degrees too low, which is plausible-looking and
+            wrong.
   w         holds m/s; ECMWF w is Pa/s, which differs by -rho*g — an order of
             magnitude and a sign
 
@@ -20,6 +25,12 @@ skipped:
 
 Idempotency is NOT checked: running it twice rotates twice. It writes a marker
 into the dataset attributes and refuses to run again unless --force is given.
+
+IT ALSO REWRITES THE STATISTICS. An earlier version changed the data and left
+the mean, stdev, minimum and maximum arrays describing the values that used to
+be there. Normalisation reads those arrays, not the data, so a dataset could be
+converted correctly and still be normalised as though it had not been, with
+nothing on screen to say so.
 """
 
 from __future__ import annotations
@@ -34,6 +45,58 @@ LEVELS = (50, 100, 150, 200, 250, 300, 400, 500, 700, 850, 925, 1000)
 WIND_PAIRS = [("10u", "10v")] + [(f"u_{l}", f"v_{l}") for l in LEVELS]
 MARKER = "bris_postprocessed"
 
+
+class Stats:
+    """Running mean, spread and extremes for the variables this script edits.
+
+    Accumulated while the conversions stream through, so no extra pass over a
+    quarter-terabyte is needed. Only touched variables are rewritten; the rest
+    of the statistics arrays are left exactly as built.
+    """
+
+    def __init__(self) -> None:
+        self.acc: dict[int, list] = {}
+
+    def note(self, index: int, values) -> None:
+        v = np.asarray(values, dtype="float64")
+        good = np.isfinite(v)
+        if not good.any():
+            return
+        v = v[good]
+        slot = self.acc.get(index)
+        if slot is None:
+            self.acc[index] = [v.size, v.sum(), float((v ** 2).sum()),
+                               float(v.min()), float(v.max())]
+            return
+        slot[0] += v.size
+        slot[1] += v.sum()
+        slot[2] += float((v ** 2).sum())
+        slot[3] = min(slot[3], float(v.min()))
+        slot[4] = max(slot[4], float(v.max()))
+
+    def write(self, z, names: list[str]) -> None:
+        if not self.acc:
+            return
+        print("\n=== rewriting statistics for the variables that changed")
+        for index in sorted(self.acc):
+            n, total, squares, lo, hi = self.acc[index]
+            mean = total / n
+            var = max(squares / n - mean * mean, 0.0)
+            new = {"mean": mean, "stdev": var ** 0.5,
+                   "minimum": lo, "maximum": hi}
+            for key, value in new.items():
+                if key not in z:
+                    continue
+                arr = z[key]
+                old = float(arr[index])
+                arr[index] = value
+                print(f"  {names[index]:8s} {key:8s} {old:14.6g} -> {value:14.6g}")
+            # anemoi keeps the raw sums alongside the derived values in some
+            # builds; leaving them stale would make any recomputation disagree.
+            for key, value in (("sums", total), ("squares", squares)):
+                if key in z:
+                    z[key][index] = value
+
 R_D = 287.05        # J/(kg K)
 G = 9.80665         # m/s2
 
@@ -46,6 +109,25 @@ def rotation_angle(lat, lon, nx, ny):
     dlon = np.gradient(lon2, axis=0)
     dlon = (dlon + np.pi) % (2 * np.pi) - np.pi
     return np.arctan2(dlon * np.cos(lat2), dlat).reshape(-1)
+
+
+def rh_scale(sample_max: float) -> float:
+    """Factor turning the stored relative humidity into percent.
+
+    MET's OPeNDAP relative_humidity_2m comes as a fraction in [0, 1]; other
+    sources use percent. The two are a factor of a hundred apart and there is
+    no overlap between a plausible fraction and a plausible percentage, so the
+    maximum decides. Anything outside both ranges stops the run rather than
+    picking the nearer one.
+    """
+    if sample_max <= 1.5:
+        return 100.0
+    if sample_max <= 120.0:
+        return 1.0
+    raise SystemExit(
+        f"relative humidity tops out at {sample_max:g}, which is neither a "
+        "fraction nor a percentage. Look at the field before converting it."
+    )
 
 
 def rh_to_dewpoint(rh_pct, t_kelvin):
@@ -92,6 +174,7 @@ def main() -> int:
     if lat.size != args.nx * args.ny:
         print(f"ERROR: {lat.size:,} points is not {args.nx}x{args.ny}", file=sys.stderr)
         return 1
+    stats = Stats()
     ang = rotation_angle(lat, lon, args.nx, args.ny)
     print(f"rotation angle: {np.degrees(ang.min()):.2f} .. {np.degrees(ang.max()):.2f} deg")
     print("  a Lambert grid over the Nordics should span roughly -30 to +30;")
@@ -106,6 +189,8 @@ def main() -> int:
             v = np.asarray(data[t, idx[vn], 0, :], dtype="float64")
             ue, ve = u * cos_a - v * sin_a, u * sin_a + v * cos_a
             drift = float(np.abs(np.hypot(u, v) - np.hypot(ue, ve)).max())
+            stats.note(idx[un], ue)
+            stats.note(idx[vn], ve)
             if not args.dry_run:
                 data[t, idx[un], 0, :] = ue.astype(data.dtype)
                 data[t, idx[vn], 0, :] = ve.astype(data.dtype)
@@ -114,11 +199,20 @@ def main() -> int:
     # --- dewpoint ------------------------------------------------------------
     print()
     if "2d" in idx and "2t" in idx:
+        # Percent or fraction, decided from the data. The stored maximum is
+        # already the answer and costs nothing to read.
+        stored_max = float(z["maximum"][idx["2d"]])
+        scale = rh_scale(stored_max)
+        print(f"  2d: stored maximum {stored_max:g}, so it holds "
+              f"{'a fraction' if scale == 100.0 else 'percent'}; "
+              f"multiplying by {scale:g}")
+        bad = 0
         for t in range(nt):
-            rh = data[t, idx["2d"], 0, :]
+            rh = np.asarray(data[t, idx["2d"], 0, :], dtype="float64") * scale
             t2 = data[t, idx["2t"], 0, :]
             td = rh_to_dewpoint(rh, t2)
-            bad = int((td > np.asarray(t2, dtype="float64") + 0.5).sum())
+            bad += int((td > np.asarray(t2, dtype="float64") + 0.5).sum())
+            stats.note(idx["2d"], td)
             if not args.dry_run:
                 data[t, idx["2d"], 0, :] = td.astype(data.dtype)
         print(f"  2d: relative humidity -> dewpoint  "
@@ -138,11 +232,13 @@ def main() -> int:
             wz = data[t, idx[wn], 0, :]
             tk = data[t, idx[tn], 0, :]
             om = wz_to_omega(wz, tk, lev * 100.0)
+            stats.note(idx[wn], om)
             if not args.dry_run:
                 data[t, idx[wn], 0, :] = om.astype(data.dtype)
         print(f"  w_{lev}: m/s -> Pa/s  ({np.nanmin(om):.3f}..{np.nanmax(om):.3f})")
 
     if not args.dry_run:
+        stats.write(z, names)
         import datetime
         z.attrs[MARKER] = datetime.datetime.now(datetime.timezone.utc).isoformat()
         print(f"\nmarked as post-processed")
