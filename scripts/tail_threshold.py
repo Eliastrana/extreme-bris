@@ -33,6 +33,11 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _venv
+
+_venv.ensure('anemoi')
+
 # Below this, a precipitation field is being stored in metres; above it, in
 # millimetres. Six-hour totals of half a metre do not occur and six-hour
 # totals under 1 mm at every point over a year do not either, so the gap
