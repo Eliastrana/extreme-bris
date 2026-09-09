@@ -5,8 +5,15 @@ defaults:
 # a100q has two A100 40GB per node. MET trained with eight GPUs per ensemble
 # member and four per model; neither fits here, so the smoke test runs the
 # smallest possible shape and only asks whether the machinery turns over.
+#
+# These are defaults for a run outside slurm. The job script overrides both
+# GPU counts from the actual allocation, because a config that disagrees with
+# what Slurm handed out fails minutes into a job that queued for hours.
+#
+# a40q is not an option despite being idle: n011 and n012 are aarch64 and the
+# environment is built for x86.
 accelerator: auto
-num_gpus_per_node: 2
+num_gpus_per_node: 1
 num_nodes: 1
 num_gpus_per_model: 1
-num_gpus_per_ensemble: 2
+num_gpus_per_ensemble: 1

@@ -3,8 +3,8 @@
 #SBATCH --partition=a100q
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:a100:2
+#SBATCH --cpus-per-task=8
+#SBATCH --gres=gpu:a100:1
 #SBATCH --time=02:00:00
 #SBATCH --output=logs/smoke-%j.out
 #SBATCH --error=logs/smoke-%j.err
@@ -44,13 +44,24 @@ echo "=== memory  : $(free -g | awk 'NR==2{print $7" GB available of "$2" GB"}')
 
 export NCCL_P2P_DISABLE=1
 export HYDRA_FULL_ERROR=1
+
+# Let the allocation decide, not the config file. Asking sbatch for one card
+# while hardware/ex3.yaml still said two is a mismatch nothing catches until
+# Lightning tries to address a GPU it was never given, minutes into a job that
+# waited hours in the queue.
+NGPU="${SLURM_GPUS_ON_NODE:-$(nvidia-smi -L 2>/dev/null | wc -l)}"
+NGPU="${NGPU:-1}"
+[[ "$NGPU" -lt 1 ]] && { echo "ERROR: no GPU visible" >&2; exit 1; }
+echo "=== gpus    : $NGPU allocated"
 # anemoi writes its own config dump next to the run; keep it out of the repo.
 mkdir -p "$HOME/bris-runs/train"
 cd "$HOME/bris-runs/train" || exit 1
 
 start=$(date +%s)
 "$VENV/bin/anemoi-training" train \
-    --config-dir "$CONFIG_DIR" --config-name "$CONFIG_NAME"
+    --config-dir "$CONFIG_DIR" --config-name "$CONFIG_NAME" \
+    hardware.num_gpus_per_node="$NGPU" \
+    hardware.num_gpus_per_ensemble="$NGPU"
 rc=$?
 elapsed=$(( $(date +%s) - start ))
 printf '\n=== finished rc=%d in %02d:%02d:%02d\n' \
