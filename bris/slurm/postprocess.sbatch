@@ -56,6 +56,12 @@ echo "=== dataset : $DATASET"
 echo "=== node    : $(hostname)"
 echo "=== memory  : $(free -g | awk 'NR==2{print $7" GB available of "$2" GB"}')"
 
+# Python block-buffers stdout when it is a file, so a job that prints one line
+# per variable shows nothing for hours and looks stalled. The progress is also
+# written into the dataset attributes, which is the authoritative record, but a
+# log you can tail is worth the flush.
+export PYTHONUNBUFFERED=1
+
 start=$(date +%s)
 "$REPO_DIR/scripts/postprocess_meps.py" "$DATASET"
 rc=$?
