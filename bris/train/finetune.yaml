@@ -123,6 +123,18 @@ dataloader:
             - ${hardware.paths.data}meps-2p5km-year1-6h-v1.zarr
         reorder: sort
         trim_edge: 50
+        # MEPS stores precipitation in kg/m2, which is millimetres; the IFS
+        # side stores it in metres. The recipe renames the field and does not
+        # convert it, so without this the two halves of the cutout stand a
+        # factor of a thousand apart with the seam running through the middle
+        # of the training target. Applied here rather than at build time so
+        # 750 GB does not have to be downloaded again. scripts/check_seam.py
+        # verified that this spelling composes and that the statistics follow
+        # the data, which is what normalisation actually reads.
+        rescale:
+          tp:
+            scale: 0.001
+            offset: 0.0
       - dataset:
           concat:
             - ${hardware.paths.data}od-an-n320-year3-6h-v1.zarr
