@@ -1,0 +1,251 @@
+# CONTROL ARM. Fine-tune Bris on my three years with Bris's own loss.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune
+#
+# This arm exists to be subtracted. Whatever the tail arm gains, some of it is
+# just the effect of three years of data the model had not seen, and without a
+# run that gets the same data, the same steps and the same schedule with the
+# ORIGINAL loss, there is no way to tell that part from the part the weighting
+# did. So this is not a warm-up for the real experiment. It is half of it.
+#
+# The rule that follows from that: finetune_tail.yaml inherits this file and
+# overrides the loss and nothing else. scripts/diff_configs.py composes both
+# and prints every key that differs. If anything but the loss shows up there,
+# the comparison is broken and the run is wasted.
+#
+# WHAT DIFFERS FROM smoke.yaml, AND WHY
+#
+#   dates       the smoke used one month of year3. This spans all three years
+#               and splits them the way the checkpoint does, below.
+#   datasets    one month fits in one year file; eighteen months does not, so
+#               each half of the cutout is a concat of the three year zarrs.
+#   ensemble    the smoke ran one member because it only had to take a step.
+#               One member turns kernel CRPS into absolute error, which is the
+#               exact failure this thesis is about. See below.
+#   steps       two, versus a real schedule.
+#   checkpoint  the smoke wrote none. This one has to, or the run produces
+#               nothing to score.
+
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- datamodule: ens
+- hardware: ex3
+- graph: stretched_grid
+- model: graphtransformer_ens
+- training: ensemble
+- _self_
+
+config_validation: False
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+data:
+  frequency: 6h
+  resolution: N320
+  forcing:
+    - lsm
+    - cos_julian_day
+    - cos_local_time
+    - cos_latitude
+    - cos_longitude
+    - sin_julian_day
+    - sin_local_time
+    - sin_latitude
+    - sin_longitude
+    - insolation
+    - z
+  diagnostic:
+    - tp
+    - ssrd
+    - strd
+  normalizer:
+    none:
+      - lsm
+      - cos_julian_day
+      - cos_local_time
+      - cos_latitude
+      - cos_longitude
+      - sin_julian_day
+      - sin_local_time
+      - sin_latitude
+      - sin_longitude
+      - insolation
+      - lcc
+      - mcc
+      - hcc
+      - tcc
+    max:
+      - z
+
+model:
+  num_channels: 1024
+  keep_batch_sharded: False
+  bounding:
+    - _target_: anemoi.models.layers.bounding.ReluBounding
+      variables:
+        - tp
+    - _target_: anemoi.models.layers.bounding.HardtanhBounding
+      variables: [tcc, hcc, mcc, lcc]
+      min_val: 0
+      max_val: 1
+  trainable_parameters:
+    data: 0
+    hidden: 0
+    data2hidden: 0
+    hidden2data: 0
+    hidden2hidden: 0
+  processor:
+    num_chunks: 4
+  encoder:
+    num_chunks: 4
+  decoder:
+    num_chunks: 4
+
+dataloader:
+  # The year files are contiguous and share a frequency, so they concatenate:
+  #   year3  2023-10-01T06 .. 2024-09-07T18
+  #   year2  2024-09-08T00 .. 2025-09-07T18
+  #   year1  2025-09-08T00 .. 2026-09-06T18
+  # All three go in on both halves and the date windows below select from
+  # them, rather than each window naming its own files. One place to be wrong
+  # instead of three.
+  dataset:
+    cutout:
+      - dataset:
+          concat:
+            - ${hardware.paths.data}meps-2p5km-year3-6h-v1.zarr
+            - ${hardware.paths.data}meps-2p5km-year2-6h-v1.zarr
+            - ${hardware.paths.data}meps-2p5km-year1-6h-v1.zarr
+        reorder: sort
+        trim_edge: 50
+      - dataset:
+          concat:
+            - ${hardware.paths.data}od-an-n320-year3-6h-v1.zarr
+            - ${hardware.paths.data}od-an-n320-year2-6h-v1.zarr
+            - ${hardware.paths.data}od-an-n320-year1-6h-v1.zarr
+        reorder: sort
+    min_distance_km: 0
+    adjust: all
+  num_workers:
+    training: 4
+    validation: 4
+    test: 4
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  # THE SPLIT IS THE CHECKPOINT'S OWN, NOT ONE I INVENTED. Bris trained to
+  # 2025-03-31 and validated after it. Fine-tuning on data that falls inside
+  # its validation window would contaminate the only period I can honestly
+  # score on, so the boundaries are copied rather than chosen:
+  #
+  #   training    2023-10-01 .. 2025-03-31   inside Bris's training window
+  #   validation  2025-04-01 .. 2025-07-31   Bris's own validation window
+  #   test        2025-08-01 .. 2026-09-06   seen by nothing, either model
+  #
+  # 23 of the 44 ranked extreme states fall in training, 6 in validation and
+  # 15 in the test window. The 15 are what the arms get compared on.
+  training:
+    start: 2023-10-01
+    end: 2025-03-31
+    reorder: sort
+  validation:
+    start: 2025-04-01
+    end: 2025-07-31
+  test:
+    start: 2025-08-01
+    end: 2026-09-06
+
+graph:
+  overwrite: False
+  nodes:
+    hidden:
+      node_builder:
+        lam_resolution: 10
+        global_resolution: 7
+        margin_radius_km: 11
+
+training:
+  run_id: null
+  fork_run_id: null
+
+  # ENSEMBLE SIZE IS NOT A TUNING KNOB HERE. Kernel CRPS on a single member
+  # collapses to absolute error, absolute error is minimised by the median,
+  # and a median-seeking model under-forecasting the tail is the entire
+  # problem being studied. A run at one member cannot test the hypothesis
+  # whichever loss it uses.
+  #
+  # Total members are ensemble_size_per_device * num_gpus_per_ensemble, so on
+  # a single A100 this is the whole ensemble. If it runs out of memory, the
+  # answer is more cards, or fewer channels, or a shorter rollout. It is not
+  # fewer members.
+  ensemble_size_per_device: 4
+
+  max_epochs: null
+  max_steps: 3000
+
+  # Warm start, not resume. load_weights_only takes the tensors and drops the
+  # optimiser state, which belongs to a different schedule on different data.
+  # transfer_learning makes anemoi treat this as a new run rather than a
+  # continuation, so the step counter starts at zero.
+  load_weights_only: True
+  transfer_learning: True
+
+  # min BELOW rate. smoke.yaml has them the other way round, inherited from a
+  # config where rate is scaled by eight GPUs before the schedule sees it. On
+  # one card the scaling does not save it and the floor sits above the peak.
+  lr:
+    rate: 3.75e-6
+    iterations: ${training.max_steps}
+    min: 3.75e-7
+    warmup: 100
+
+  # BRIS'S OWN LOSS, UNCHANGED. The almost-fair kernel CRPS is the ensemble
+  # score, in the variant that corrects the bias a finite ensemble introduces.
+  # The second term scores the spatial power spectrum across the MEPS grid and
+  # carries a tenth of the weight. This pairing is what the published weights
+  # were trained with, and reproducing it exactly is the point of this arm.
+  training_loss:
+    _target_: anemoi.training.losses.combined.CombinedLoss
+    losses:
+        - _target_: anemoi.training.losses.AlmostFairKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+        - _target_: anemoi.training.losses.CRPSFFTLoss
+          xdim: 849
+          ydim: 969
+          fft: True
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
+    scalers: ['*']
+    loss_weights: [1.0, 0.1]
+
+  rollout:
+    start: 1
+    epoch_increment: 0
+    max: 1
+
+diagnostics:
+  plot:
+    callbacks: []
+  log:
+    interval: 50
+    # Nothing remote. The compute nodes reach the internet only through a
+    # proxy that has already eaten one run, and tensorboard writes to disk.
+    wandb:
+      enabled: False
+    mlflow:
+      enabled: False
+    tensorboard:
+      enabled: True
+  # BY STEP, NOT BY EPOCH. max_steps stops the run partway through an epoch,
+  # so an epoch-end checkpoint would never fire and the run would finish
+  # having saved nothing at all.
+  checkpoint:
+    every_n_train_steps:
+      save_frequency: 500
+      num_models_saved: -1

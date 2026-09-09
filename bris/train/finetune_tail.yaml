@@ -1,0 +1,88 @@
+# TREATMENT ARM. The control arm plus one extra loss term, and nothing else.
+#
+#   scripts/tail_threshold.py                 # get the number below
+#   sbatch bris/slurm/finetune.sbatch finetune_tail
+#
+# This file inherits finetune.yaml and overrides exactly one key. Every date,
+# every dataset, the learning rate, the step count, the ensemble size and the
+# seed come from there, so a difference in the results has one candidate
+# cause. Check that claim rather than trusting it:
+#
+#   scripts/diff_configs.py finetune finetune_tail
+#
+# should print training.training_loss and nothing more.
+#
+# WHAT THE THIRD TERM DOES. It is the same almost-fair kernel CRPS as the
+# first, scored on max(x, threshold) of precipitation and on zero everywhere
+# else. Clipping at a threshold is what turns CRPS into threshold-weighted
+# CRPS for the indicator weight, which keeps the score proper; the reasoning
+# and the reference are in xbris/losses.py. Zeroing the other variables stops
+# this term from quietly reweighting all 98 of them instead of the tail.
+#
+# WHY THE FIRST TWO TERMS STAY. A loss that is blind below the threshold would
+# trade away ordinary days without noticing, and ordinary days are 341 of the
+# year. The tail term is added at a weight, not swapped in.
+#
+# WHAT IS DELIBERATELY NOT HERE: OVERSAMPLING. The other knob changes which
+# states the model sees rather than what the loss cares about. Turning both at
+# once gives a result with two candidate causes and no way to separate them,
+# so it is a third arm and a later run, not an addition to this one.
+
+defaults:
+- finetune
+- _self_
+
+training:
+  training_loss:
+    _target_: anemoi.training.losses.combined.CombinedLoss
+    losses:
+        # --- identical to the control arm ---------------------------------
+        # If either of these two drifts from finetune.yaml, the experiment is
+        # measuring the drift. diff_configs.py is what catches that.
+        - _target_: anemoi.training.losses.AlmostFairKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+        - _target_: anemoi.training.losses.CRPSFFTLoss
+          xdim: 849
+          ydim: 969
+          fft: True
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
+
+        # --- the only thing this arm adds ---------------------------------
+        - _target_: xbris.losses.TailWeightedKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+
+          # NULL ON PURPOSE. The loss sees normalised values, so this has to
+          # be the normalised equivalent of the millimetre threshold, and the
+          # conversion depends on statistics that live in the dataset:
+          #
+          #   scripts/tail_threshold.py --mm 20
+          #
+          # prints it. The loss refuses to build while this is null, because a
+          # threshold that is wrong by the width of the distribution trains
+          # perfectly happily and means nothing.
+          #
+          # 20 mm per 6 h is the starting point because the ranking already
+          # reports area_ge_20 for every state, so how much of the domain this
+          # term will actually see is known before the run rather than after.
+          tail_threshold: null
+          tail_variable: tp
+
+          # Resolved from the checkpoint's data_indices when anemoi hands them
+          # over, and cross-checked against this if both exist. Fill it in
+          # from scripts/inspect_checkpoint.py only if the run says it must.
+          tail_index: null
+
+          tail_scale: 1.0
+
+    scalers: ['*']
+
+    # THE THIRD WEIGHT IS A PLACEHOLDER AND SHOULD BE MEASURED, NOT GUESSED.
+    # The estimator averages over all output channels and this term is nonzero
+    # on one of them, so its raw value lands roughly two orders of magnitude
+    # below the main term. The loss logs its own value on the first five
+    # forward passes for exactly this reason: read those against the main
+    # term in the same log, then set this so the tail is a deliberate
+    # fraction of the total rather than an accident of channel count.
+    loss_weights: [1.0, 0.1, 100.0]
