@@ -33,6 +33,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _venv
+import _compose
 
 _venv.ensure('hydra')
 
@@ -60,10 +61,7 @@ def flatten(node, prefix: str = "") -> dict:
 
 
 def compose(config_dir: Path, name: str):
-    from hydra import compose as hydra_compose, initialize_config_dir
-
-    with initialize_config_dir(config_dir=str(config_dir.resolve()), version_base=None):
-        return hydra_compose(config_name=name)
+    return _compose.compose(config_dir, name)
 
 
 def main() -> int:

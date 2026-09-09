@@ -35,6 +35,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _venv
+import _compose
 
 _venv.ensure('anemoi')
 
@@ -108,11 +109,8 @@ def main() -> int:
     args = ap.parse_args()
 
     from anemoi.datasets import open_dataset
-    from hydra import compose, initialize_config_dir
 
-    with initialize_config_dir(config_dir=str(args.config_dir.resolve()),
-                               version_base=None):
-        cfg = compose(config_name=args.config_name)
+    cfg = _compose.compose(args.config_dir, args.config_name)
 
     # ---- the units check, on each half separately --------------------------
     halves = cfg.dataloader.dataset.cutout
