@@ -43,6 +43,11 @@ def main() -> int:
     ap.add_argument("--round", type=int, default=1)
     ap.add_argument("--compare", type=Path,
                     help="a second extremes file, drawn as the dashed series")
+    ap.add_argument("--series", action="store_true",
+                    help="keep the inputs apart as named series the chart can "
+                         "switch on and off, rather than merging them")
+    ap.add_argument("--names", help="comma-separated names for --series; "
+                                    "defaults to each file's stem")
     args = ap.parse_args()
 
     def series(paths: list[Path]) -> list[dict]:
@@ -70,6 +75,34 @@ def main() -> int:
         # Several years arrive as several files; sort so the axis is monotone
         # rather than trusting the order the shell expanded the glob in.
         return [{"x": day, "y": rows[day]} for day in sorted(rows)]
+
+    # One file per year, kept apart. The years do not overlap in time, so a
+    # merged line would run continuously across all three and there would be
+    # nothing to switch off; as named series the reader can isolate a year.
+    if args.series:
+        names = (args.names.split(",") if args.names
+                 else [p.stem for p in args.inputs])
+        if len(names) != len(args.inputs):
+            print(f"ERROR: {len(names)} names for {len(args.inputs)} files",
+                  file=sys.stderr)
+            return 2
+        out = {"series": []}
+        for name, path in zip(names, args.inputs):
+            rows = series([path])
+            if not rows:
+                print(f"ERROR: no daily records in {path}", file=sys.stderr)
+                return 2
+            out["series"].append({"name": name.strip(), "data": rows})
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(out))
+        total = sum(len(s["data"]) for s in out["series"])
+        print(f"{len(out['series'])} series, {total} days, {args.field}, "
+              f"{args.out.stat().st_size / 1024:.0f} KB -> {args.out}")
+        for s in out["series"]:
+            print(f"  {s['name']:10s} {len(s['data']):4d} days  "
+                  f"{s['data'][0]['x']} .. {s['data'][-1]['x']}  "
+                  f"max {max(p['y'] for p in s['data'])}")
+        return 0
 
     data = series(args.inputs)
     if not data:
