@@ -66,7 +66,13 @@ training:
           # 20 mm per 6 h is the starting point because the ranking already
           # reports area_ge_20 for every state, so how much of the domain this
           # term will actually see is known before the run rather than after.
-          tail_threshold: null
+          # 20 mm per 6 h, converted by scripts/tail_threshold.py against the
+          # statistics of the composed dataset on 2026-09-09. In normalised
+          # units that is 12.66, against a dataset maximum of 96.6, so the
+          # clamp bites only where rain is genuinely extreme. Recompute this
+          # if the datasets or the rescale change; the number is meaningless
+          # on its own.
+          tail_threshold: 12.65973
           tail_variable: tp
 
           # Resolved from the checkpoint's data_indices when anemoi hands them
