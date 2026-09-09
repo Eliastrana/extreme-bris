@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=postprocess
+#SBATCH --partition=defq
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=1-00:00:00
+#SBATCH --output=logs/postprocess-%j.out
+#SBATCH --error=logs/postprocess-%j.err
+#
+# Apply the conversions anemoi's filters cannot, to one built dataset.
+#
+#   mkdir -p logs
+#   sbatch bris/slurm/postprocess.sbatch ~/bris-data/meps-2p5km-year3-6h-v1.zarr
+#
+# One dataset per job, so the three years can run at the same time on
+# different nodes. They touch different files and share only the filesystem.
+#
+# CHECK IT FIRST, ON THE LOGIN NODE. A dry run reads a single state and prints
+# the rotation angle range and the humidity scale, which are the two things
+# that decide whether the conversions are being applied correctly:
+#
+#   scripts/postprocess_meps.py <dataset> --dry-run
+#
+# MEMORY IS SMALL AND TIME IS NOT. The script holds one variable of one state
+# at a time, which is a few megabytes, so 32 GB is generous. What it does is
+# read and rewrite about half a terabyte through zarr for a year file, and
+# that is bounded by the filesystem rather than by this node.
+#
+# INTERRUPTION IS SAFE NOW, AND WAS NOT BEFORE. Each variable is recorded as
+# it completes. A job that hits the walltime can be resubmitted and will skip
+# what is already converted. Without that, a partly converted dataset looks
+# untouched, and a second run would rotate and convert those variables twice.
+
+set -uo pipefail
+
+DATASET="${1:-}"
+if [[ -z "$DATASET" ]]; then
+    echo "usage: sbatch $0 <path to .zarr>" >&2
+    exit 1
+fi
+[[ -d "$DATASET" ]] || { echo "ERROR: no dataset at $DATASET" >&2; exit 1; }
+
+REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
+[[ -f "$REPO_DIR/scripts/env.sh" ]] && source "$REPO_DIR/scripts/env.sh"
+
+echo "=== dataset : $DATASET"
+echo "=== node    : $(hostname)"
+echo "=== memory  : $(free -g | awk 'NR==2{print $7" GB available of "$2" GB"}')"
+
+start=$(date +%s)
+"$REPO_DIR/scripts/postprocess_meps.py" "$DATASET"
+rc=$?
+elapsed=$(( $(date +%s) - start ))
+printf '\n=== finished rc=%d in %02d:%02d:%02d\n' \
+    "$rc" $((elapsed/3600)) $(((elapsed%3600)/60)) $((elapsed%60))
+
+if [[ $rc -eq 0 ]]; then
+    echo "=== CONVERTED - now check the rotation:"
+    echo "    scripts/check_rotation.py $DATASET"
+else
+    echo "=== BLOCKED (rc=$rc). Resubmitting resumes from where it stopped." >&2
+fi
+exit $rc
