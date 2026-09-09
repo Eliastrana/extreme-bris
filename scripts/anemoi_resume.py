@@ -28,6 +28,16 @@ deliberate act, not a silent one.
 
 from __future__ import annotations
 
+# Hand over to an interpreter that has these, if this one does not. These
+# scripts are run by path, so the shebang picks up whatever python3 is on
+# PATH, and on the login node that one has none of the stack.
+import sys as _sys, pathlib as _pathlib  # noqa: E401
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent))
+import _venv  # noqa: E402
+
+_venv.ensure('anemoi')
+
+
 import argparse
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
