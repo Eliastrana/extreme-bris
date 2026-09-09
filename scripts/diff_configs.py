@@ -50,8 +50,20 @@ def flatten(node, prefix: str = "") -> dict:
 
     out: dict = {}
     if isinstance(node, (DictConfig, dict)):
-        for k, v in node.items():
-            out.update(flatten(v, f"{prefix}.{k}" if prefix else str(k)))
+        for k in list(node.keys()):
+            path = f"{prefix}.{k}" if prefix else str(k)
+            try:
+                v = node[k]
+            except Exception as exc:  # noqa: BLE001
+                # A key left mandatory-but-unset, or an interpolation that
+                # cannot resolve. Both are legitimate here: the config leaves
+                # the Weights and Biases entity blank because that logger is
+                # switched off, and anemoi never reads it. Walking the whole
+                # tree does read it, so record what it is and carry on rather
+                # than letting an unused key stop the comparison.
+                out[path] = f"<unresolved: {type(exc).__name__}>"
+                continue
+            out.update(flatten(v, path))
     elif isinstance(node, (ListConfig, list)):
         for i, v in enumerate(node):
             out.update(flatten(v, f"{prefix}[{i}]"))
