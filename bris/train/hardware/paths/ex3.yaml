@@ -1,0 +1,14 @@
+# Where things live on eX3. Everything under $HOME: the compute nodes have a
+# 40 GB local disk that a build of this size fills without noticing.
+data: /home/eliastra/bris-data/
+output: /home/eliastra/bris-runs/train/
+truncation: null
+logs:
+  base: ${hardware.paths.output}logs/
+  wandb: ${hardware.paths.logs.base}
+  mlflow: ${hardware.paths.logs.base}mlflow/
+  tensorboard: ${hardware.paths.logs.base}tensorboard/
+checkpoints: ${hardware.paths.output}checkpoint/
+plots: ${hardware.paths.output}plots/
+profiler: ${hardware.paths.output}profiler/
+graph: /home/eliastra/bris-runs/graphs/

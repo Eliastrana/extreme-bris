@@ -1,0 +1,190 @@
+# The smallest question worth asking: can anemoi-training load the published
+# Bris weights and take a training step on the datasets built here?
+#
+#   sbatch bris/slurm/train_smoke.sbatch
+#
+# Everything else in the fine-tuning plan rests on the answer, and nothing
+# else in the plan is worth designing until it is yes. So this run computes
+# nothing useful on purpose: two steps, no checkpoint written, no logging to
+# anything remote, one month of data. If it survives, the machinery works.
+#
+# WHAT DIFFERS FROM MET'S OWN CONFIG, AND WHY
+#
+#   hardware        theirs is Leonardo, with eight GPUs per ensemble member.
+#                   a100q has two A100s per node.
+#   searchpath      theirs points at an anemoi-core checkout on Leonardo that
+#                   does not exist here. Removed; the packaged configs suffice.
+#   graph.overwrite theirs is True, which rebuilds 1.36 million nodes from
+#                   scratch. The graph is in the checkpoint; extract it once
+#                   with scripts/extract_graph.py and read it from disk.
+#   cutout          theirs joins two global zarrs and drops nine variables to
+#                   reach the model's 98. The od dataset built here already IS
+#                   those 98, in the model's own order, so it goes in whole.
+#   warm_start      theirs forks a run id. Here it is an explicit path to the
+#                   inference checkpoint, for the reasons in hardware/files.
+#   dates           one month, and validation is the month after it. Enough to
+#                   prove a step; far too little to prove anything else.
+
+defaults:
+- data: zarr
+- dataloader: native_grid
+- diagnostics: evaluation
+- datamodule: ens
+- hardware: ex3
+- graph: stretched_grid
+- model: graphtransformer_ens
+- training: ensemble
+- _self_
+
+config_validation: False
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+data:
+  frequency: 6h
+  resolution: N320
+  forcing:
+    - lsm
+    - cos_julian_day
+    - cos_local_time
+    - cos_latitude
+    - cos_longitude
+    - sin_julian_day
+    - sin_local_time
+    - sin_latitude
+    - sin_longitude
+    - insolation
+    - z
+  diagnostic:
+    - tp
+    - ssrd
+    - strd
+  normalizer:
+    none:
+      - lsm
+      - cos_julian_day
+      - cos_local_time
+      - cos_latitude
+      - cos_longitude
+      - sin_julian_day
+      - sin_local_time
+      - sin_latitude
+      - sin_longitude
+      - insolation
+      - lcc
+      - mcc
+      - hcc
+      - tcc
+    max:
+      - z
+
+model:
+  num_channels: 1024
+  keep_batch_sharded: False
+  bounding:
+    - _target_: anemoi.models.layers.bounding.ReluBounding
+      variables:
+        - tp
+    - _target_: anemoi.models.layers.bounding.HardtanhBounding
+      variables: [tcc, hcc, mcc, lcc]
+      min_val: 0
+      max_val: 1
+  trainable_parameters:
+    data: 0
+    hidden: 0
+    data2hidden: 0
+    hidden2data: 0
+    hidden2hidden: 0
+  processor:
+    num_chunks: 4
+  encoder:
+    num_chunks: 4
+  decoder:
+    num_chunks: 4
+
+dataloader:
+  dataset:
+    cutout:
+      - dataset: ${hardware.paths.data}${hardware.files.dataset_lam}
+        reorder: sort
+        trim_edge: 50
+      - dataset: ${hardware.paths.data}${hardware.files.dataset_global}
+        reorder: sort
+    min_distance_km: 0
+    adjust: all
+  num_workers:
+    training: 2
+    validation: 2
+    test: 2
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  limit_batches:
+    training: 2
+    validation: 1
+  training:
+    start: 2023-10-01
+    end: 2023-10-31
+    reorder: sort
+  validation:
+    start: 2023-11-01
+    end: 2023-11-30
+  test:
+    start: 2023-11-01
+    end: 2023-11-30
+
+graph:
+  overwrite: False
+  nodes:
+    hidden:
+      node_builder:
+        lam_resolution: 10
+        global_resolution: 7
+        margin_radius_km: 11
+
+training:
+  run_id: null
+  fork_run_id: null
+  ensemble_size_per_device: 1
+  max_epochs: 1
+  max_steps: 2
+  load_weights_only: True
+  transfer_learning: True
+  lr:
+    rate: 3.75e-6
+    min: 8.0e-6
+    warmup: 1
+  training_loss:
+    _target_: anemoi.training.losses.combined.CombinedLoss
+    losses:
+        - _target_: anemoi.training.losses.AlmostFairKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+        - _target_: anemoi.training.losses.CRPSFFTLoss
+          xdim: 849
+          ydim: 969
+          fft: True
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
+    scalers: ['*']
+    loss_weights: [1.0, 0.1]
+  rollout:
+    start: 1
+    epoch_increment: 0
+    max: 1
+
+diagnostics:
+  plot:
+    callbacks: []
+  log:
+    interval: 1
+    wandb:
+      enabled: False
+    mlflow:
+      enabled: False
+    tensorboard:
+      enabled: False
+  checkpoint: null

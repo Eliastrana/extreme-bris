@@ -1,0 +1,12 @@
+defaults:
+- paths: ex3
+- files: ex3
+
+# a100q has two A100 40GB per node. MET trained with eight GPUs per ensemble
+# member and four per model; neither fits here, so the smoke test runs the
+# smallest possible shape and only asks whether the machinery turns over.
+accelerator: auto
+num_gpus_per_node: 2
+num_nodes: 1
+num_gpus_per_model: 1
+num_gpus_per_ensemble: 2
