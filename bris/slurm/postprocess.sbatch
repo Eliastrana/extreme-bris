@@ -4,7 +4,6 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=32G
 #SBATCH --time=1-00:00:00
 #SBATCH --output=logs/postprocess-%j.out
 #SBATCH --error=logs/postprocess-%j.err
@@ -23,10 +22,18 @@
 #
 #   scripts/postprocess_meps.py <dataset> --dry-run
 #
-# MEMORY IS SMALL AND TIME IS NOT. The script holds one variable of one state
-# at a time, which is a few megabytes, so 32 GB is generous. What it does is
-# read and rewrite about half a terabyte through zarr for a year file, and
-# that is bounded by the filesystem rather than by this node.
+# NO MEMORY REQUEST, ON PURPOSE. The script holds one variable of one state at
+# a time, a few megabytes, so whatever the partition hands out by default is
+# ample. An explicit 32 GB was refused outright by defq, and a job that will
+# not submit is worse than one that asks for too little. The line below prints
+# what it actually got.
+#
+# TIME IS THE CONSTRAINT, NOT MEMORY. A year file means reading and rewriting
+# roughly half a terabyte through zarr, bounded by the filesystem rather than
+# by this node.
+#
+# To run somewhere else without editing this file:
+#   sbatch -p milanq bris/slurm/postprocess.sbatch <dataset>
 #
 # INTERRUPTION IS SAFE NOW, AND WAS NOT BEFORE. Each variable is recorded as
 # it completes. A job that hits the walltime can be resubmitted and will skip
