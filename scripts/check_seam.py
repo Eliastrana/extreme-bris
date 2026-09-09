@@ -87,7 +87,22 @@ def compare(cfg) -> int:
     for half in halves:
         spec = half["dataset"]
         paths = [Path(p) for p in (spec["concat"] if "concat" in spec else [spec])]
-        collected.append(stats_of(paths))
+        names, stats = stats_of(paths)
+        # A mismatch fixed in the dataloader is fixed. Comparing the files
+        # alone would keep flagging it, and a flag that is always on is a flag
+        # nobody reads.
+        for var, spec_r in (half.get("rescale") or {}).items():
+            if var not in names:
+                continue
+            i = names.index(var)
+            scale = float(spec_r.get("scale", 1.0))
+            offset = float(spec_r.get("offset", 0.0))
+            print(f"  applying the config's rescale to {var}: "
+                  f"x{scale:g} {offset:+g}")
+            for key in ("mean", "minimum", "maximum"):
+                stats[key][i] = stats[key][i] * scale + offset
+            stats["stdev"][i] = stats["stdev"][i] * abs(scale)
+        collected.append((names, stats))
 
     (na, sa), (nb, sb) = collected
     shared = [v for v in na if v in nb]

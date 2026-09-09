@@ -52,7 +52,20 @@ def classify_units(sample_max: float) -> str:
     return "m" if sample_max < UNIT_CUT else "mm"
 
 
-def half_units(paths: list[Path]) -> list[tuple[str, str, float]]:
+def declared_rescale(half, variable: str) -> tuple[float, float]:
+    """The scale and offset the config applies to this half of the cutout.
+
+    A unit mismatch can be fixed in the built data or declared in the
+    dataloader, and this has to judge what the run will actually see. Reading
+    the files alone would keep reporting a mismatch that the config already
+    corrects, and a warning that is always on is a warning nobody reads.
+    """
+    spec = (half.get("rescale") or {}).get(variable) or {}
+    return float(spec.get("scale", 1.0)), float(spec.get("offset", 0.0))
+
+
+def half_units(paths: list[Path], scale: float = 1.0,
+               offset: float = 0.0) -> list[tuple[str, str, float]]:
     """Read the stored maximum of tp from each zarr and name its units."""
     import zarr
 
@@ -64,7 +77,7 @@ def half_units(paths: list[Path]) -> list[tuple[str, str, float]]:
             out.append((p.name, "no tp", 0.0))
             continue
         i = names.index("tp")
-        mx = float(z["maximum"][i])
+        mx = float(z["maximum"][i]) * scale + offset
         out.append((p.name, classify_units(mx), mx))
     return out
 
@@ -120,9 +133,12 @@ def main() -> int:
     for label, half in zip(labels, halves):
         spec = half["dataset"]
         paths = [Path(p) for p in (spec["concat"] if "concat" in spec else [spec])]
-        rows = half_units(paths)
+        scale, offset = declared_rescale(half, "tp")
+        rows = half_units(paths, scale, offset)
+        note = "" if scale == 1.0 and offset == 0.0 else \
+            f"  (config rescales by {scale:g})"
         for name, units, mx in rows:
-            print(f"  {label:12s} {name:38s} max {mx:12.6g}  -> {units}")
+            print(f"  {label:12s} {name:38s} max {mx:12.6g}  -> {units}{note}")
         found = {u for _, u, _ in rows if u not in ("empty", "no tp")}
         verdicts.append((label, found))
 
