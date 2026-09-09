@@ -52,6 +52,11 @@ import numpy as np  # noqa: E402
 
 from postprocess_meps import PROGRESS, WIND_PAIRS, rotation_angle  # noqa: E402
 
+# Its own progress, so that interrupting this leaves a recoverable state too.
+# Undoing a rotation twice is as wrong as applying it twice, and the file
+# times cannot tell the two apart once this has started writing.
+UNROTATE = "bris_unrotate_partial"
+
 
 def chunk_times(dataset: Path, nt: int) -> np.ndarray:
     """Modification time of the file holding each state."""
@@ -140,13 +145,27 @@ def main() -> int:
     ang = rotation_angle(lat, lon, args.nx, args.ny)
     cos_a, sin_a = np.cos(ang), np.sin(ang)
 
+    # Resume, if an earlier run of this was interrupted. The boundary above is
+    # still correct after a partial undo, because undoing only touches states
+    # inside 0..k and so cannot move the edge; what it cannot tell is how far
+    # the undo got. That is what this records.
+    first = 0
+    partial = z.attrs.get(UNROTATE)
+    if partial:
+        if list(partial["pair"]) != [un, vn]:
+            print(f"ERROR: an interrupted undo was working on "
+                  f"{'/'.join(partial['pair'])}, not {un}/{vn}.", file=sys.stderr)
+            return 1
+        first = int(partial["states_done"])
+        print(f"\n  resuming an interrupted undo at state {first}")
+
     if args.dry_run:
-        print(f"\nDry run. Would rotate {k + 1} state(s) of {un}/{vn} back.")
+        print(f"\nDry run. Would rotate states {first}..{k} of {un}/{vn} back.")
         return 0
 
-    print(f"\n=== undoing the rotation on {k + 1} state(s)")
+    print(f"\n=== undoing the rotation on {k + 1 - first} state(s)")
     started = datetime.datetime.now()
-    for t in range(k + 1):
+    for t in range(first, k + 1):
         block = data[t]
         ue = np.asarray(block[idx[un], 0, :], dtype="float64")
         ve = np.asarray(block[idx[vn], 0, :], dtype="float64")
@@ -157,11 +176,13 @@ def main() -> int:
         block[idx[un], 0, :] = u.astype(block.dtype)
         block[idx[vn], 0, :] = v.astype(block.dtype)
         data[t] = block
+        z.attrs[UNROTATE] = {"pair": [un, vn], "states_done": t + 1}
         if t % 25 == 0 or t == k:
-            per = (datetime.datetime.now() - started).total_seconds() / (t + 1)
+            per = (datetime.datetime.now() - started).total_seconds() / (t - first + 1)
             left = datetime.timedelta(seconds=int(per * (k - t)))
             print(f"  {t + 1}/{k + 1}  {per:.2f} s each  about {left} left")
 
+    del z.attrs[UNROTATE]
     print(f"\n{un}/{vn} is now unrotated across all {nt} states. "
           "postprocess_meps.py will treat it as pending like any other variable.")
     return 0
