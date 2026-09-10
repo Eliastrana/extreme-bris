@@ -222,19 +222,29 @@ training:
   # The second term scores the spatial power spectrum across the MEPS grid and
   # carries a tenth of the weight. This pairing is what the published weights
   # were trained with, and reproducing it exactly is the point of this arm.
+  # THE SPECTRAL TERM IS ABSENT, AND NOT BY CHOICE. Bris was pretrained with a
+  # second loss term scoring the spatial power spectrum, and MET's config names
+  # it anemoi.training.losses.CRPSFFTLoss. No such class exists in
+  # anemoi-training 0.5.1, nor anywhere else in this environment; their config
+  # was written against their own anemoi-core checkout. Reimplementing it from
+  # a class name and three arguments is the kind of guess this project has been
+  # punished for twice.
+  #
+  # So both arms train without it, which has a cost worth naming. That term
+  # exists to stop the model producing smooth, blurred fields, and without it
+  # both arms drift toward smoothness. The drift is shared, so arm against arm
+  # remains a fair test. Arm against the untouched baseline carries two changes
+  # rather than one, and that has to be said out loud when the numbers are
+  # reported. It can also be measured: compare the spatial spectrum of a
+  # fine-tuned forecast against the baseline's rather than assuming it is small.
   training_loss:
     _target_: anemoi.training.losses.combined.CombinedLoss
     losses:
         - _target_: anemoi.training.losses.AlmostFairKernelCRPS
           alpha: 0.95
           scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-        - _target_: anemoi.training.losses.CRPSFFTLoss
-          xdim: 849
-          ydim: 969
-          fft: True
-          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
     scalers: ['*']
-    loss_weights: [1.0, 0.1]
+    loss_weights: [1.0]
 
   rollout:
     start: 1

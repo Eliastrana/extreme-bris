@@ -37,16 +37,15 @@ training:
     _target_: anemoi.training.losses.combined.CombinedLoss
     losses:
         # --- identical to the control arm ---------------------------------
-        # If either of these two drifts from finetune.yaml, the experiment is
-        # measuring the drift. diff_configs.py is what catches that.
+        # If this drifts from finetune.yaml, the experiment is measuring the
+        # drift. diff_configs.py is what catches that.
+        #
+        # There was a spectral term here too, matching Bris's pretraining. It
+        # is gone from both arms because the class does not exist in this
+        # anemoi; the reasoning is in finetune.yaml.
         - _target_: anemoi.training.losses.AlmostFairKernelCRPS
           alpha: 0.95
           scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-        - _target_: anemoi.training.losses.CRPSFFTLoss
-          xdim: 849
-          ydim: 969
-          fft: True
-          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
 
         # --- the only thing this arm adds ---------------------------------
         - _target_: xbris.losses.TailWeightedKernelCRPS
@@ -99,4 +98,4 @@ training:
     # forward passes for exactly this reason: read those against the main
     # term in the same log, then set this so the tail is a deliberate
     # fraction of the total rather than an accident of channel count.
-    loss_weights: [1.0, 0.1, 100.0]
+    loss_weights: [1.0, 100.0]
