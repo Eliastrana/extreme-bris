@@ -256,8 +256,11 @@ diagnostics:
       enabled: False
       entity: unused
       project: unused
+    # Same story as the entity above: declared mandatory, never read while the
+    # logger is off, and fatal at startup if left unset.
     mlflow:
       enabled: False
+      tracking_uri: unused
     tensorboard:
       enabled: True
   # BY STEP, NOT BY EPOCH. max_steps stops the run partway through an epoch,
