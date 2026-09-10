@@ -183,8 +183,25 @@ graph:
         margin_radius_km: 11
 
 training:
+  # A FORK ID IS REQUIRED TO WARM START AT ALL, EVEN THOUGH NOTHING IS FORKED.
+  # anemoi sets start_from_checkpoint from the run ids alone:
+  #
+  #     self.start_from_checkpoint = bool(run_id) or bool(fork_run_id)
+  #
+  # and last_checkpoint returns None the moment that is false. So a warm start
+  # from a file on disk cannot happen without naming a run, however correct the
+  # path is. The first attempt failed with "Loading weights with Transfer
+  # Learning from None" and a path that was never consulted.
+  #
+  # The path it then assembles is
+  #
+  #     Path(checkpoints.parent, fork_id or lineage_run, files.warm_start)
+  #
+  # and an absolute path in the last position discards the two before it, which
+  # is why hardware/files/ex3.yaml can name the published checkpoint directly
+  # and this id is never part of any real path. It is a key, not a location.
   run_id: null
-  fork_run_id: null
+  fork_run_id: 00000000-0000-0000-0000-000000000000
 
   # ENSEMBLE SIZE IS NOT A TUNING KNOB HERE. Kernel CRPS on a single member
   # collapses to absolute error, absolute error is minimised by the median,
