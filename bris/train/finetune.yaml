@@ -248,8 +248,14 @@ diagnostics:
     interval: 50
     # Nothing remote. The compute nodes reach the internet only through a
     # proxy that has already eaten one run, and tensorboard writes to disk.
+    # entity is declared mandatory-but-unset by the packaged config, and
+    # anemoi resolves the entire config at startup rather than lazily. So an
+    # unset value here kills the run before the first batch, even though the
+    # logger is off and nothing ever reads it. Any string will do.
     wandb:
       enabled: False
+      entity: unused
+      project: unused
     mlflow:
       enabled: False
     tensorboard:

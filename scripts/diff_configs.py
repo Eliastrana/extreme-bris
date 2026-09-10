@@ -110,6 +110,21 @@ def main() -> int:
             stray.append(k)
         print(f"{mark} {k:<{width}}  {show(va)}  ->  {show(vb)}")
 
+    # Keys that could not be resolved at all. They cancel out of the diff when
+    # both arms share them, which is exactly how one of them reached a GPU: the
+    # comparison said the arms matched, and anemoi then refused to start because
+    # it resolves the whole config before the first batch.
+    unresolved = sorted(k for k in keys
+                        if str(a.get(k, "")).startswith("<unresolved")
+                        or str(b.get(k, "")).startswith("<unresolved"))
+    if unresolved:
+        print(f"\n{len(unresolved)} key(s) cannot be resolved in either arm:")
+        for k in unresolved:
+            print(f"  {k}")
+        print("anemoi resolves the whole config at startup, so each of these "
+              "stops the run\nbefore the first batch whether or not anything "
+              "reads it. Give them a value.")
+
     if stray:
         print(f"\n{len(stray)} of them are outside {args.expect_prefix}, marked !.",
               file=sys.stderr)
