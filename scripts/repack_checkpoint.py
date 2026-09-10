@@ -67,22 +67,43 @@ def stub_missing(name: str) -> None:
         def __setstate__(self, state):
             pass
 
-    module.__getattr__ = lambda attr: type(attr, (_Any,), {})  # noqa: ARG005
+    def _make(attr: str):
+        # Dunders must stay absent. torch.load asks modules for __file__ and
+        # friends, and a stub that answers those with a class breaks the
+        # unpickler somewhere far from here.
+        if attr.startswith("__") and attr.endswith("__"):
+            raise AttributeError(attr)
+        return type(attr, (_Any,), {})
+
+    module.__getattr__ = _make
+    module.__file__ = f"<stub {name}>"
     sys.modules[name] = module
 
 
 def training_checkpoint_keys(path: Path) -> set[str] | None:
     """Key names from MET's training checkpoint, if it can be coaxed open."""
     if not path.exists():
+        print(f"  no file at {path}")
         return None
-    for missing in ("anemoi.models.migrations",
-                    "anemoi.models.migrations.migrator"):
-        stub_missing(missing)
-    try:
-        ckpt = torch.load(path, weights_only=False, map_location="cpu")
-    except Exception as exc:  # noqa: BLE001
-        print(f"  could not open the training checkpoint: "
-              f"{type(exc).__name__}: {str(exc)[:160]}")
+
+    # Stub whatever it asks for, as it asks, rather than guessing the names.
+    ckpt = None
+    for _ in range(20):
+        try:
+            ckpt = torch.load(path, weights_only=False, map_location="cpu")
+            break
+        except ModuleNotFoundError as exc:
+            if not exc.name:
+                print(f"  could not open it: {exc}")
+                return None
+            print(f"  stubbing absent module {exc.name}")
+            stub_missing(exc.name)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  could not open the training checkpoint: "
+                  f"{type(exc).__name__}: {str(exc)[:200]}")
+            return None
+    if ckpt is None:
+        print("  gave up after 20 missing modules")
         return None
     sd = ckpt.get("state_dict") if isinstance(ckpt, dict) else None
     if not sd:
