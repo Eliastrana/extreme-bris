@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:a100:2
+#SBATCH --gres=gpu:2
 #SBATCH --time=2-00:00:00
 #SBATCH --output=logs/finetune-%j.out
 #SBATCH --error=logs/finetune-%j.err
@@ -36,6 +36,18 @@
 # THE SEED IS FIXED AND SHARED. Both arms have to draw the same samples in the
 # same order, or part of any difference between them is which states each one
 # happened to see. This is the cheapest control in the whole design.
+#
+# THE GRES ASKS FOR CARDS, NOT FOR A100s. Naming the type pins the job to
+# a100q, which is two cards in the whole cluster, and the queue there is deep.
+# Written generically it can also land on hgx2q, dgx2q or h200q, and the
+# partition list is what decides:
+#
+#   sbatch -p a100q,hgx2q,h200q --gres=gpu:1 -t 02:00:00 \
+#       bris/slurm/finetune.sbatch finetune_tail training.max_steps=2 ...
+#
+# Slurm takes whichever of those can start it first. Leave the AMD partitions
+# out: torch here is built for CUDA. Leave a40q and gh200q out too, since
+# n009-n012 and gh001-gh002 are aarch64 and this environment is x86.
 #
 # NCCL_P2P_DISABLE: two A100s in one node deadlocked in a collective during an
 # earlier run here, resident at full utilisation with no progress for 150
