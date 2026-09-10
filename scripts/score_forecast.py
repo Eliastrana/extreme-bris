@@ -133,7 +133,7 @@ def main() -> int:
     label = args.label or args.forecasts[0].parent.name
     print(f"=== {label}: {len(args.forecasts)} forecast file(s), {args.element}\n")
 
-    fc_all, ob_all, lead_all = [], [], []
+    fc_all, ob_all, lead_all, all_times = [], [], [], []
     convention = None
 
     for path in args.forecasts:
@@ -166,6 +166,7 @@ def main() -> int:
         ob_all.append(truth[:, 1:])
         lead_all.append(np.tile(np.arange(1, len(times)) * step_h,
                                 (series.shape[0], 1)))
+        all_times.append(times)
         print(f"  {path.name}: {int(keep.sum())} gauges, {len(times)} steps "
               f"{step_h}h apart" + (f", {convention}" if convention else ""))
 
@@ -176,13 +177,33 @@ def main() -> int:
     fc = np.concatenate([a.ravel() for a in fc_all])
     ob = np.concatenate([a.ravel() for a in ob_all])
     lead = np.concatenate([a.ravel() for a in lead_all])
+    all_times = np.concatenate(all_times)
 
     # A valid time is a tail case if any gauge passed the threshold THEN. The
     # split is made on the observations alone, never on the forecast, or the
     # comparison would ask each arm about a different set of days.
     tail_pairs = ob >= args.tail_mm
-    print(f"\n  {int(np.isfinite(ob).sum()):,} station-hours with truth, "
+    n_truth = int(np.isfinite(ob).sum())
+    print(f"\n  {n_truth:,} station-hours with truth, "
           f"{int(tail_pairs.sum()):,} of them at or above {args.tail_mm:g}")
+
+    if n_truth == 0:
+        # Almost always the cache not covering these dates rather than anything
+        # wrong with the forecast, and a bare zero does not say which.
+        have = (obs["times"].min(), obs["times"].max())
+        print(f"\n  The gauge cache covers {have[0]} .. {have[1]}.")
+        print(f"  These forecasts are valid over "
+              f"{np.min(all_times)} .. {np.max(all_times)}.")
+        if np.max(all_times) < have[0] or np.min(all_times) > have[1]:
+            print("  Those do not overlap, which is the whole explanation.")
+            print("  Extend the cache:  scripts/fetch_observations.py "
+                  f"--start {str(np.min(all_times))[:10]} "
+                  f"--end {str(np.max(all_times))[:10]}")
+        else:
+            print("  They do overlap, so the gauges reported nothing usable in "
+                  "that window.\n  A partial accumulation window counts as "
+                  "missing here, by design.")
+        return 1
 
     report = {
         "label": label,
