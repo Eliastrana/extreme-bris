@@ -75,10 +75,18 @@ training:
           tail_threshold: 12.65973
           tail_variable: tp
 
-          # Resolved from the checkpoint's data_indices when anemoi hands them
-          # over, and cross-checked against this if both exist. Fill it in
-          # from scripts/inspect_checkpoint.py only if the run says it must.
-          tail_index: null
+          # Precipitation is dataset variable 48 but model output channel 38
+          # of 87, because the output carries only what the model predicts and
+          # the eleven forcings are not among them. That difference is exactly
+          # the kind that trains happily while weighting the wrong field.
+          #
+          #   scripts/inspect_checkpoint.py --output-index tp <checkpoint>
+          #
+          # Written down rather than left to anemoi, because if anemoi does
+          # not hand the loss its indices the run dies at construction. Where
+          # it does hand them over they are checked against this, and a
+          # disagreement stops the run instead of picking a side.
+          tail_index: 38
 
           tail_scale: 1.0
 
