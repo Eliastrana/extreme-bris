@@ -1,10 +1,23 @@
 # The two halves of the cutout, and the graph taken out of the checkpoint.
 #
-# WARM START IS THE INFERENCE CHECKPOINT, NOT THE TRAINING ONE. The training
-# checkpoint MET published unpickles into anemoi.models.migrations, a module
-# absent from the anemoi-models 0.8.1 their own pyproject pins. The inference
-# checkpoint loads cleanly, and with load_weights_only the optimiser state in
-# the other one is not wanted anyway.
+# WARM START IS A REPACKAGED FILE, BECAUSE NEITHER PUBLISHED ONE WORKS.
+#
+# The training checkpoint is the format transfer learning wants, and it cannot
+# be opened: it unpickles into anemoi.models.migrations, a module absent from
+# the anemoi-models 0.8.1 their own pyproject pins. The inference checkpoint
+# opens cleanly but is a pickled model object, while transfer_learning_loading
+# reaches straight for checkpoint["state_dict"] and gets an AttributeError.
+#
+# scripts/repack_checkpoint.py takes the weights out of the inference object
+# and writes the dict, prefixing every key with `model.` to match the Lightning
+# module. That prefix is not a guess: the script reads the key names out of the
+# training checkpoint as well, stubbing the missing module far enough to
+# unpickle, and all 493 keys matched.
+#
+# The check matters because anemoi loads with strict=False and discards what
+# comes back. A wrong prefix would load nothing, report nothing, and train a
+# randomly initialised model while every log line said transfer learning
+# succeeded.
 dataset_lam: meps-2p5km-year3-6h-v1.zarr
 dataset_global: od-an-n320-year3-6h-v1.zarr
 dataset: ${hardware.files.dataset_lam}
@@ -15,4 +28,4 @@ checkpoint:
   every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
   every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
   every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
-warm_start: /home/eliastra/bris-models/bris-forecaster/bris-crpsfft_inference.ckpt
+warm_start: /home/eliastra/bris-models/bris-forecaster/bris-crpsfft_warmstart.ckpt
