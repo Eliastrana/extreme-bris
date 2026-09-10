@@ -261,8 +261,16 @@ diagnostics:
     mlflow:
       enabled: False
       tracking_uri: unused
+    # Not installed in this environment, and installing it is not free:
+    # tensorboard drags in protobuf, grpcio and absl, and protobuf version
+    # fights are a classic way to break a working torch stack for the sake of
+    # a graph. The loss still reaches the job log every `interval` steps
+    # above, and the arms are compared by the scorer rather than by curves, so
+    # nothing the experiment needs is lost.
+    #
+    # If curves become worth it later, tensorboardX is the lighter of the two.
     tensorboard:
-      enabled: True
+      enabled: False
   # BY STEP, NOT BY EPOCH. max_steps stops the run partway through an epoch,
   # so an epoch-end checkpoint would never fire and the run would finish
   # having saved nothing at all.
