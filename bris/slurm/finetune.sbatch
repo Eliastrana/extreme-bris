@@ -89,6 +89,11 @@ echo "=== arm     : $CONFIG_NAME"
 echo "=== node    : $(hostname)"
 echo "=== memory  : $(free -g | awk 'NR==2{print $7" GB available of "$2" GB"}')"
 
+# 21 GB of the card was reserved but unallocated when this first ran out of
+# memory, which is fragmentation rather than genuine need. Expandable segments
+# let the allocator grow a block instead of hunting for a contiguous one.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 export NCCL_P2P_DISABLE=1
 export HYDRA_FULL_ERROR=1
 export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-20260909}"

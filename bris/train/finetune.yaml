@@ -99,12 +99,20 @@ model:
     data2hidden: 0
     hidden2data: 0
     hidden2hidden: 0
+  # CHUNKING IS A MEMORY KNOB, NOT A MODELLING ONE. Attention over 1.36 million
+  # nodes is computed in pieces; more pieces means a smaller peak and the same
+  # arithmetic. The first attempt at four chunks asked for 24 GB more than an
+  # H200 had left, inside the encoder's gather.
+  #
+  # This is the right knob to reach for before the ensemble size, because
+  # ensemble size changes what is being measured and this does not. Four
+  # members on one card stays.
   processor:
-    num_chunks: 4
+    num_chunks: 16
   encoder:
-    num_chunks: 4
+    num_chunks: 16
   decoder:
-    num_chunks: 4
+    num_chunks: 16
 
 dataloader:
   # The year files are contiguous and share a frequency, so they concatenate:
