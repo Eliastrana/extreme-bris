@@ -48,6 +48,15 @@ _venv.ensure("numpy", "requests")
 
 import numpy as np  # noqa: E402
 
+# This is long enough to be worth running detached, and detached means stdout is
+# a file, which Python block-buffers. Progress that appears an hour late is
+# progress nobody can act on, and the obvious workaround is an environment
+# variable the person running it has to remember.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except (AttributeError, ValueError):
+    pass
+
 from bris_tls import ensure_ca_bundle                    # noqa: E402
 from plot_stations import client_id, frost_get           # noqa: E402
 from check_smoothing import BATCH, norwegian_stations    # noqa: E402
