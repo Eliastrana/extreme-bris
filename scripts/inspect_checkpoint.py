@@ -137,6 +137,12 @@ def main() -> int:
     )
     ap.add_argument("checkpoint", type=Path)
     ap.add_argument("--json", type=Path, help="also write the full metadata as JSON")
+    ap.add_argument("--output-index", metavar="VAR",
+                    help="print which channel of the model OUTPUT holds VAR, "
+                         "and exit. This is the number a loss needs to weight "
+                         "one variable, and it is not the variable's position "
+                         "in the dataset: the output carries only what the "
+                         "model predicts, in its own order.")
     args = ap.parse_args()
 
     if not args.checkpoint.exists():
@@ -147,6 +153,30 @@ def main() -> int:
 
     meta = load_metadata(args.checkpoint)
     names = variable_names(meta)
+
+    if args.output_index:
+        want = args.output_index
+        if want not in names:
+            print(f"{want!r} is not among the {len(names)} variables",
+                  file=sys.stderr)
+            return 1
+        dataset_index = names.index(want)
+        groups = index_groups(meta)
+        full = groups.get("output.full")
+        if not full:
+            print("this checkpoint carries no output.full index list; the "
+                  "groups it does carry are: " + ", ".join(sorted(groups)),
+                  file=sys.stderr)
+            return 1
+        if dataset_index not in full:
+            print(f"{want} is not predicted by this model: it appears in the "
+                  "dataset but not in the model output", file=sys.stderr)
+            return 1
+        channel = full.index(dataset_index)
+        print(f"{want}: dataset index {dataset_index}, "
+              f"model output channel {channel} of {len(full)}")
+        print(f"\n  tail_index: {channel}")
+        return 0
 
     if names:
         print(f"--- variables ({len(names)}), in model index order")
