@@ -40,35 +40,11 @@ _venv.ensure("zarr", "numpy")
 
 import numpy as np  # noqa: E402
 
-EARTH_R = 6371.0088          # km
 TRIM = 50                    # rows and columns the dataloader drops per side
 NX, NY = 949, 1069
 
-
-def great_circle_km(lat1, lon1, lat2, lon2):
-    """Haversine, broadcast over whatever shapes come in."""
-    p1, p2 = np.deg2rad(lat1), np.deg2rad(lat2)
-    dp = p2 - p1
-    dl = np.deg2rad(lon2 - lon1)
-    a = np.sin(dp / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(dl / 2) ** 2
-    return 2 * EARTH_R * np.arcsin(np.sqrt(np.clip(a, 0, 1)))
-
-
-def nearest(slat, slon, glat, glon, block: int = 16):
-    """Index of and distance to the closest grid point, per station.
-
-    Blocked over stations rather than built as one array: a million grid points
-    against several hundred stations is billions of pairs, and the whole point
-    of this script is to be runnable on a login node.
-    """
-    idx = np.empty(slat.size, dtype="int64")
-    dist = np.empty(slat.size, dtype="float64")
-    for i in range(0, slat.size, block):
-        j = slice(i, min(i + block, slat.size))
-        d = great_circle_km(slat[j, None], slon[j, None], glat[None, :], glon[None, :])
-        idx[j] = d.argmin(axis=1)
-        dist[j] = d.min(axis=1)
-    return idx, dist
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from xbris.stations import nearest  # noqa: E402
 
 
 def main() -> int:
