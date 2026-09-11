@@ -63,10 +63,36 @@ ELEMENTS = {
 MARGIN = 3          # grid points of slack around the station bounding box
 
 
+# Which xarray backend can talk OPeNDAP here. The dataset recipes use pydap,
+# but that lives in the build environment; this one has netcdf4, whose library
+# speaks DAP directly. Decided once, from what actually opens, rather than
+# named in advance and wrong in one environment or the other.
+_ENGINE: str | None = None
+
+
 def open_cycle(when: dt.datetime):
+    global _ENGINE
     import xarray as xr
 
-    return xr.open_dataset(ARCHIVE.format(t=when), engine="pydap")
+    url = ARCHIVE.format(t=when)
+    if _ENGINE:
+        return xr.open_dataset(url, engine=_ENGINE)
+
+    tried = {}
+    for engine in ("netcdf4", "pydap"):
+        try:
+            ds = xr.open_dataset(url, engine=engine)
+        except Exception as exc:  # noqa: BLE001
+            tried[engine] = f"{type(exc).__name__}: {str(exc)[:120]}"
+            continue
+        _ENGINE = engine
+        print(f"  reading the archive with the {engine} engine")
+        return ds
+
+    raise SystemExit(
+        "no xarray engine here can open the archive over OPeNDAP:\n  "
+        + "\n  ".join(f"{k}: {v}" for k, v in tried.items())
+    )
 
 
 def station_cells(obs, when: dt.datetime):
