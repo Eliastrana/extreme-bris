@@ -41,7 +41,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import _venv  # noqa: E402
 
-_venv.ensure("xarray", "numpy")
+# pydap, specifically. netcdf4's own DAP client fails against thredds through
+# this site's TLS proxy, with a curl error and nothing useful in it. The
+# dataset recipes read the same archive with pydap, which lives in the build
+# environment rather than the training one, so asking for it here is what sends
+# this to the interpreter that can actually reach the data.
+_venv.ensure("xarray", "numpy", "pydap")
 
 import numpy as np  # noqa: E402
 
@@ -79,7 +84,7 @@ def open_cycle(when: dt.datetime):
         return xr.open_dataset(url, engine=_ENGINE)
 
     tried = {}
-    for engine in ("netcdf4", "pydap"):
+    for engine in ("pydap", "netcdf4"):
         try:
             ds = xr.open_dataset(url, engine=engine)
         except Exception as exc:  # noqa: BLE001
