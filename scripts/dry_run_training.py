@@ -45,6 +45,15 @@ import _compose  # noqa: E402
 
 _venv.ensure("anemoi", "torch")
 
+import os  # noqa: E402
+
+# anemoi takes its base seed from the environment and asserts if neither
+# ANEMOI_BASE_SEED nor SLURM_JOB_ID is set. A job always has one; a login shell
+# does not. This must be the same value bris/slurm/finetune.sbatch uses, or the
+# dry run composes a different run than the one it is standing in for, which is
+# the one thing a dry run must never do.
+BASE_SEED = "20260909"
+
 
 # Everything a GPU would otherwise decide, pinned so this runs anywhere.
 CPU_OVERRIDES = [
@@ -77,6 +86,11 @@ def main() -> int:
 
     # xbris.losses is named by _target_ in the tail arm, so it must import.
     sys.path.insert(0, str(REPO.parent))
+
+    if not os.environ.get("ANEMOI_BASE_SEED"):
+        os.environ["ANEMOI_BASE_SEED"] = BASE_SEED
+        print(f"note: ANEMOI_BASE_SEED unset; using {BASE_SEED}, "
+              "the same value the job script uses\n")
 
     overrides = [] if args.keep_gpu_settings else CPU_OVERRIDES
     print(f"=== composing {args.config_name}")
