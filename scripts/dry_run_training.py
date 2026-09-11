@@ -45,6 +45,7 @@ import _compose  # noqa: E402
 
 _venv.ensure("anemoi", "torch")
 
+import logging  # noqa: E402
 import os  # noqa: E402
 
 # anemoi takes its base seed from the environment and asserts if neither
@@ -80,12 +81,24 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("config_name", nargs="?", default="finetune_tail")
     ap.add_argument("--config-dir", type=Path, default=REPO.parent / "bris" / "train")
+    ap.add_argument("--quiet", action="store_true",
+                    help="suppress anemoi's own INFO logging")
     ap.add_argument("--keep-gpu-settings", action="store_true",
                     help="do not force the CPU; only useful on a compute node")
     args = ap.parse_args()
 
     # xbris.losses is named by _target_ in the tail arm, so it must import.
     sys.path.insert(0, str(REPO.parent))
+
+    # anemoi's own command line configures logging; constructing the trainer
+    # directly does not, so every LOGGER.info it emits was being discarded.
+    # That hid the very lines worth reading here, such as what each variable is
+    # scaled by. Warnings came through regardless, which is why the tendency
+    # warning was visible and nothing else was.
+    logging.basicConfig(
+        level=logging.WARNING if args.quiet else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
 
     if not os.environ.get("ANEMOI_BASE_SEED"):
         os.environ["ANEMOI_BASE_SEED"] = BASE_SEED
