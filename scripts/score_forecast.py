@@ -3,6 +3,14 @@
 
     scripts/score_forecast.py ~/bris-runs/20251004T00Z-od-120h/nordic_*.nc
     scripts/score_forecast.py --label bris-tail ~/bris-runs/tail/nordic_*.nc
+    scripts/score_forecast.py --label meps ~/bris-runs/meps/precipitation.npz
+
+TWO SHAPES OF FORECAST, ONE SCORE. The arms produce gridded NetCDF, one file
+per run, and the station values are read out of the grid. MEPS is fetched at
+the gauge sites directly, because pulling a year of full fields to use a
+thousand points of them would be absurd. Both end up as the same thing, a value
+per station per valid time, and everything after that is shared. It has to be:
+a control scored by a different code path is not a control.
 
 WHAT THIS IS FOR. The experiment ends in a comparison: baseline, control arm,
 treatment arm, with MEPS alongside as something whose skill is known. That
@@ -112,6 +120,70 @@ def score(fc, ob) -> dict:
     }
 
 
+def from_grid(path: Path, obs: dict, var: str, convert, max_dist_km: float):
+    """Station series read out of a gridded forecast file."""
+    import xarray as xr
+
+    with xr.open_dataset(path) as ds:
+        if var not in ds:
+            print(f"  {path.name}: no {var}, skipping")
+            return None
+        glat, glon, shape = load_grid(path)
+        idx, dist = nearest(obs["lat"], obs["lon"], glat, glon)
+        keep = dist <= max_dist_km
+        row, col = np.divmod(idx[keep], shape[1])
+
+        times = ds["time"].values.astype("datetime64[s]")
+        field = np.asarray(ds[var].squeeze().values, dtype="float64")
+        if field.ndim != 3:
+            print(f"  {path.name}: {var} is {field.ndim}-D after squeeze, "
+                  "expected time by y by x; skipping")
+            return None
+        series = convert(field[:, row, col]).T
+
+    step_h = int((times[1] - times[0]) / np.timedelta64(1, "h")) if len(times) > 1 else 6
+    return [(series, times, step_h, keep, None)]
+
+
+def from_points(path: Path, obs: dict, element: str):
+    """Station series read from a point forecast file, one entry per cycle.
+
+    The stations are realigned by name rather than assumed to be in the same
+    order. They are written by the same fetch that reads the gauge cache, so
+    they should match, but a silent misalignment here would pair every station
+    with somebody else's weather and still produce a number.
+    """
+    with np.load(path, allow_pickle=False) as f:
+        values = f["values"]
+        stations = f["stations"]
+        cycles = np.array([np.datetime64(c) for c in f["cycles"]],
+                          dtype="datetime64[s]")
+        leads = f["leads"].astype(int)
+        accumulation = str(f["accumulation"]) if "accumulation" in f else ""
+
+    where = {s: i for i, s in enumerate(stations)}
+    order = np.array([where.get(s, -1) for s in obs["stations"]])
+    keep = order >= 0
+    if not keep.any():
+        print(f"  {path.name}: no station in it matches the gauge cache")
+        return None
+    if keep.sum() < len(obs["stations"]):
+        print(f"  {path.name}: {int((~keep).sum())} gauge(s) absent from it")
+
+    step_h = int(leads[1] - leads[0]) if len(leads) > 1 else 6
+    out = []
+    for ci, cycle in enumerate(cycles):
+        series = values[order[keep], ci, :].astype("float64")
+        if not np.isfinite(series).any():
+            continue
+        times = cycle + leads.astype("timedelta64[h]").astype("timedelta64[s]")
+        out.append((series, times, step_h, keep, accumulation))
+    print(f"  {path.name}: {int(keep.sum())} gauges, {len(out)} cycles kept of "
+          f"{len(cycles)}, {len(leads)} leads {step_h}h apart"
+          + (f", {accumulation}" if accumulation else ""))
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -137,38 +209,33 @@ def main() -> int:
     convention = None
 
     for path in args.forecasts:
-        with xr.open_dataset(path) as ds:
-            if var not in ds:
-                print(f"  {path.name}: no {var}, skipping")
-                continue
-            glat, glon, shape = load_grid(path)
-            idx, dist = nearest(obs["lat"], obs["lon"], glat, glon)
-            keep = dist <= args.max_dist_km
-            row, col = np.divmod(idx[keep], shape[1])
+        if path.suffix == ".npz":
+            blocks = from_points(path, obs, args.element)
+        else:
+            blocks = from_grid(path, obs, var, convert, args.max_dist_km)
+        if not blocks:
+            continue
 
-            times = ds["time"].values.astype("datetime64[s]")
-            field = np.asarray(ds[var].squeeze().values, dtype="float64")
-            if field.ndim != 3:
-                print(f"  {path.name}: {var} is {field.ndim}-D after squeeze, "
-                      "expected time by y by x; skipping")
-                continue
-            series = convert(field[:, row, col]).T          # stations by time
+        for series, times, step_h, keep, note in blocks:
+            if args.element == "precipitation" and note is None:
+                # A gridded file may hold amounts per step or since the run
+                # began. A point file says which it holds and has already been
+                # differenced, so leave it alone.
+                series, convention = deaccumulate(series)
+            elif note:
+                convention = note
+            truth = accumulate(obs["values"][keep], obs["times"], times,
+                               step_h if args.element == "precipitation" else 1)
 
-        step_h = int((times[1] - times[0]) / np.timedelta64(1, "h")) \
-            if len(times) > 1 else 6
-        if args.element == "precipitation":
-            series, convention = deaccumulate(series)
-        truth = accumulate(obs["values"][keep], obs["times"], times,
-                           step_h if args.element == "precipitation" else 1)
-
-        # Step zero of a forecast is its own initial state, not a forecast.
-        fc_all.append(series[:, 1:])
-        ob_all.append(truth[:, 1:])
-        lead_all.append(np.tile(np.arange(1, len(times)) * step_h,
-                                (series.shape[0], 1)))
-        all_times.append(times)
-        print(f"  {path.name}: {int(keep.sum())} gauges, {len(times)} steps "
-              f"{step_h}h apart" + (f", {convention}" if convention else ""))
+            # Step zero of a forecast is its own initial state, not a forecast.
+            fc_all.append(series[:, 1:])
+            ob_all.append(truth[:, 1:])
+            lead_all.append(np.tile(np.arange(1, len(times)) * step_h,
+                                    (series.shape[0], 1)))
+            all_times.append(times)
+        if blocks and blocks[0][4] is None:
+            print(f"  {path.name}: {len(blocks)} run(s)"
+                  + (f", {convention}" if convention else ""))
 
     if not fc_all:
         print("\nNothing scored.", file=sys.stderr)
