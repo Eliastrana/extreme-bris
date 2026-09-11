@@ -48,7 +48,22 @@ import _venv  # noqa: E402
 # this to the interpreter that can actually reach the data.
 _venv.ensure("xarray", "numpy", "pydap")
 
+import warnings  # noqa: E402
+
 import numpy as np  # noqa: E402
+
+# pydap says this once per file opened, which over four hundred cycles is four
+# hundred copies of the same paragraph. The suggestion in it is real, that DAP4
+# would be faster than the DAP2 it falls back to, but a run that works is worth
+# more than one that is quicker and untested.
+warnings.filterwarnings("ignore", message=".*unable to determine the DAP protocol.*")
+
+# Long enough to run detached, and detached means stdout is a file, which
+# Python block-buffers.
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except (AttributeError, ValueError):
+    pass
 
 from bris_tls import ensure_ca_bundle  # noqa: E402
 
