@@ -87,7 +87,13 @@ def fetch_part(ids, element, t0, t1, cid) -> list[tuple[str, str, float]]:
     ref = f"{t0:%Y-%m-%dT%H:%M:%S}Z/{t1:%Y-%m-%dT%H:%M:%S}Z"
     data = frost_get("observations/v0.jsonld",
                      {"sources": ",".join(ids), "referencetime": ref,
-                      "elements": element}, cid).get("data", [])
+                      "elements": element,
+                      # Ask for hourly and nothing finer. Temperature and wind
+                      # are instantaneous and many stations report them every
+                      # ten minutes, which is six times the data for no gain:
+                      # the model steps six-hourly. Precipitation is already
+                      # hourly by virtue of the element name.
+                      "timeresolutions": "PT1H"}, cid).get("data", [])
     out = []
     for rec in data:
         sid = rec.get("sourceId", "").split(":")[0]
@@ -173,6 +179,25 @@ def main() -> int:
 
         if not rows:
             print(f"  {name}: nothing returned; skipping\n")
+            continue
+
+        # ---- keep whole hours only ------------------------------------------
+        # The time axis is the union of every timestamp seen. A single station
+        # reporting every ten minutes therefore adds five empty columns for
+        # every station that reports hourly, and the hourly ones then look
+        # five sixths absent. The first run of this reported three usable
+        # temperature stations out of 1120 for exactly that reason.
+        #
+        # Applied here rather than only in the request, so answers already
+        # cached are fixed without asking Frost for them again.
+        whole = [r for r in rows if r[1][14:16] == "00" and r[1][17:19] == "00"]
+        dropped = len(rows) - len(whole)
+        if dropped:
+            print(f"  {name}: dropped {dropped:,} sub-hourly values of "
+                  f"{len(rows):,}")
+        rows = whole
+        if not rows:
+            print(f"  {name}: nothing left on the hour; skipping\n")
             continue
 
         # ---- dense grid, stations that said nothing dropped ------------------
