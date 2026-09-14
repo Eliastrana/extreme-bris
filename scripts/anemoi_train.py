@@ -18,6 +18,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import os  # noqa: E402
+
+# Armed before anything touches the card, so every allocation is recorded.
+if os.environ.get("XBRIS_MEMORY_SNAPSHOT"):
+    from xbris import memory  # noqa: E402
+
+    memory.record_until_oom(os.environ["XBRIS_MEMORY_SNAPSHOT"])
+
 from xbris import patches  # noqa: E402
 
 patches.apply()
