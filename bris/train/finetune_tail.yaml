@@ -33,6 +33,29 @@ defaults:
 - _self_
 
 training:
+  # A NORDIC-ONLY AREA WEIGHT, USED BY THE TAIL TERM AND NOTHING ELSE.
+  #
+  # The ranking that decides what counts as extreme looked only at the MEPS
+  # half of the grid. The tail term looked at the whole stretched grid, and
+  # somewhere in the tropics it rains more than 20 mm in six hours every day.
+  # Counted from the data on eleven measured states: over 20 mm, extreme states
+  # had 5,400 Nordic points each and ordinary states 730, a sevenfold
+  # difference, while the global half had about 1,350 on both. On ordinary
+  # days 65 percent of the exceedances were global. A term that fires every
+  # day cannot keep the quiet days out of the loss.
+  #
+  # lam_area_weight is the graph's own area weight with every global node set
+  # to zero: nodes 0 to 822,680 are the Nordic cutout. Normalised to unit sum
+  # like the global node_weights, so the term is an area-weighted average over
+  # the Nordic region only. The main term keeps the global weights; it is still
+  # Bris's own objective, unchanged between the arms.
+  scalers:
+    lam_node_weights:
+      _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+      nodes_name: ${graph.data}
+      nodes_attribute_name: lam_area_weight
+      norm: unit-sum
+
   training_loss:
     _target_: anemoi.training.losses.combined.CombinedLoss
     losses:
@@ -50,7 +73,9 @@ training:
         # --- the only thing this arm adds ---------------------------------
         - _target_: xbris.losses.TailWeightedKernelCRPS
           alpha: 0.95
-          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+          # lam_node_weights, not node_weights: Nordic points only. See the
+          # scalers block above.
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'lam_node_weights']
 
           # NULL ON PURPOSE. The loss sees normalised values, so this has to
           # be the normalised equivalent of the millimetre threshold, and the
@@ -65,13 +90,21 @@ training:
           # 20 mm per 6 h is the starting point because the ranking already
           # reports area_ge_20 for every state, so how much of the domain this
           # term will actually see is known before the run rather than after.
-          # 20 mm per 6 h, converted by scripts/tail_threshold.py against the
-          # statistics of the composed dataset on 2026-09-09. In normalised
-          # units that is 12.66, against a dataset maximum of 96.6, so the
-          # clamp bites only where rain is genuinely extreme. Recompute this
-          # if the datasets or the rescale change; the number is meaningless
-          # on its own.
-          tail_threshold: 12.65973
+          # 20 mm per 6 h in the units the loss sees, which are set by the
+          # NORMALISER IN THE CHECKPOINT, not by the dataset. The warm start
+          # loads MET's normaliser along with the weights: precipitation is
+          # divided by a spread of 2.36946 mm and no mean is subtracted, so
+          #
+          #   0.020 m * 422.037 = 8.44074
+          #
+          # The first value here, 12.66, was converted with the dataset's own
+          # mean and spread. To the model it meant 30 mm, not 20. Nothing
+          # failed; the measurement's count of target points over the threshold
+          # came out at a third of the true count at 20 mm, which is how it
+          # showed. scripts/tail_threshold.py now reads the checkpoint's
+          # normaliser and refuses to pass a value that does not mean what
+          # --mm says.
+          tail_threshold: 8.44074
           tail_variable: tp
 
           # Precipitation is dataset variable 48 but model output channel 38

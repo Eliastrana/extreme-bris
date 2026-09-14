@@ -116,6 +116,8 @@ def summarise(rows: list[dict], n_window: int, n_ext_window: int, seconds: float
         "mean_fraction_over_threshold_extreme":
             mean(r["n_exceed"] / r["n_points"] for r in ext if r.get("n_points")),
         "mean_points_over_threshold_ordinary": mean(r["n_exceed"] for r in ordn),
+        "mean_nordic_points_over_threshold_extreme": mean(r.get("n_exceed_nordic") for r in ext),
+        "mean_nordic_points_over_threshold_ordinary": mean(r.get("n_exceed_nordic") for r in ordn),
         "window_states": n_window, "window_extreme": n_ext_window,
         "share_of_loss_at_weight": share(weight) if np.isfinite(weight) and ordn else None,
         "share_of_loss_at_placeholder_100": share(100.0) if ordn else None,
@@ -136,6 +138,10 @@ def summarise(rows: list[dict], n_window: int, n_ext_window: int, seconds: float
     print(f"=== points over the threshold: {summary['mean_points_over_threshold_extreme']:.0f} "
           f"on extreme states ({summary['mean_fraction_over_threshold_extreme']:.2e} of the grid)"
           + (f", {summary['mean_points_over_threshold_ordinary']:.0f} on ordinary states" if ordn else ""))
+    if ext and ext[0].get("n_exceed_nordic") is not None:
+        print(f"=== Nordic points over the threshold: "
+              f"{summary['mean_nordic_points_over_threshold_extreme']:.0f} on extreme states"
+              + (f", {summary['mean_nordic_points_over_threshold_ordinary']:.0f} on ordinary states" if ordn else ""))
     if summary["share_of_loss_at_weight"] is not None:
         print(f"=== tail share of the loss over the window: "
               f"{summary['share_of_loss_at_weight']:.1%} at the measured weight, "
@@ -286,6 +292,10 @@ def main() -> int:
     import pytorch_lightning as pl
 
     model = trainer.model
+    # The Nordic cutout is the first block of points; count it separately,
+    # since that is the region the ranking and the tail term are about.
+    grids = getattr(ds.data, "grids", None)
+    nordic = int(grids[0]) if grids else 822_681
     records: list[dict] = []
     current: dict = {}
     combined = model.loss
@@ -308,6 +318,7 @@ def main() -> int:
             if hasattr(_part, "tail_threshold"):
                 column = a[1][..., _part.tail_index]
                 current["n_exceed"] = int((column > _part.tail_threshold).sum())
+                current["n_exceed_nordic"] = int((column[..., :nordic] > _part.tail_threshold).sum())
                 current["n_points"] = int(column.numel())
             return value
 
@@ -341,6 +352,7 @@ def main() -> int:
         row["main"] = r.get(MAIN)
         row["tail"] = r.get(TAIL)
         row["n_exceed"] = r.get("n_exceed")
+        row["n_exceed_nordic"] = r.get("n_exceed_nordic")
         row["n_points"] = r.get("n_points")
         rows.append(row)
 

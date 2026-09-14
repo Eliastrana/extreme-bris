@@ -82,8 +82,9 @@ def main() -> int:
     ap.add_argument("left", nargs="?", default="finetune")
     ap.add_argument("right", nargs="?", default="finetune_tail")
     ap.add_argument("--config-dir", type=Path, default=REPO / "bris" / "train")
-    ap.add_argument("--expect-prefix", default="training.training_loss",
-                    help="differences outside this prefix make the run non-zero")
+    ap.add_argument("--expect-prefix", nargs="+",
+                    default=["training.training_loss", "training.scalers.lam_node_weights"],
+                    help="differences outside these prefixes make the run non-zero")
     args = ap.parse_args()
 
     a = flatten(compose(args.config_dir, args.left))
@@ -105,7 +106,7 @@ def main() -> int:
     print(f"=== {len(rows)} differences between {args.left} and {args.right}\n")
     stray = []
     for k, va, vb in rows:
-        mark = " " if k.startswith(args.expect_prefix) else "!"
+        mark = " " if any(k.startswith(p) for p in args.expect_prefix) else "!"
         if mark == "!":
             stray.append(k)
         print(f"{mark} {k:<{width}}  {show(va)}  ->  {show(vb)}")
@@ -126,13 +127,13 @@ def main() -> int:
               "reads it. Give them a value.")
 
     if stray:
-        print(f"\n{len(stray)} of them are outside {args.expect_prefix}, marked !.",
+        print(f"\n{len(stray)} of them are outside {' or '.join(args.expect_prefix)}, marked !.",
               file=sys.stderr)
         print("The arms are not comparable while those stand: a result could "
               "come from any of them.", file=sys.stderr)
         return 2
 
-    print(f"\nAll differences are inside {args.expect_prefix}. The arms are comparable.")
+    print(f"\nAll differences are inside {' or '.join(args.expect_prefix)}. The arms are comparable.")
     return 0
 
 

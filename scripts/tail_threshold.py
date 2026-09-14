@@ -6,8 +6,8 @@
 
 WHY THIS EXISTS. The threshold-weighted term in finetune_tail.yaml clips
 precipitation at a threshold, and it sees normalised values, not millimetres.
-The conversion depends on statistics that live inside the built dataset and on
-which normaliser the config assigns to tp. Both are knowable and neither is
+The conversion depends on the normaliser stored in the checkpoint the run
+warm-starts from, not on the dataset's statistics. Both are knowable and neither is
 guessable, so this reads them and prints the number to paste in.
 
 Getting it wrong is silent. A threshold set a standard deviation too high
@@ -80,6 +80,36 @@ def half_units(paths: list[Path], scale: float = 1.0,
         mx = float(z["maximum"][i]) * scale + offset
         out.append((p.name, classify_units(mx), mx))
     return out
+
+
+def model_normaliser(cfg, variable: str) -> tuple[float, float, str]:
+    """Scale and offset the warm-started model applies to one variable.
+
+    Read from the checkpoint the run loads, because that is what the loss sees:
+    transfer learning copies the normaliser's buffers along with the weights.
+    """
+    import torch
+
+    path = str(cfg.hardware.files.warm_start)
+    ckpt = torch.load(path, weights_only=False, map_location="cpu")
+    if isinstance(ckpt, dict):
+        state, indices = ckpt["state_dict"], ckpt["hyper_parameters"]["data_indices"]
+    else:
+        state, indices = ckpt.state_dict(), ckpt.data_indices
+    idx = indices.name_to_index[variable]
+    key_mul = next(k for k in state if k.endswith("pre_processors.processors.normalizer._norm_mul"))
+    key_add = next(k for k in state if k.endswith("pre_processors.processors.normalizer._norm_add"))
+    return (float(state[key_mul].reshape(-1)[idx]),
+            float(state[key_add].reshape(-1)[idx]), path)
+
+
+def configured_tail_threshold(cfg) -> float | None:
+    """The threshold the tail term is configured with, if this config has one."""
+    for loss in cfg.training.training_loss.get("losses", []):
+        if str(loss.get("_target_", "")).endswith("TailWeightedKernelCRPS"):
+            value = loss.get("tail_threshold")
+            return None if value is None else float(value)
+    return None
 
 
 def normaliser_for(cfg, variable: str) -> str:
@@ -165,36 +195,44 @@ def main() -> int:
     else:
         print(f"  both halves store tp in {unit_sets[0].pop()}\n")
 
-    # ---- the threshold, from the composed dataset the run will actually see -
+    # ---- the threshold, in the units the loss actually sees ------------------
+    # NOT FROM THE DATASET'S STATISTICS. The normaliser's scale is stored in the
+    # checkpoint with the weights, and the warm start loads it over whatever the
+    # dataset would have given. For precipitation MET's normaliser divides by a
+    # spread and subtracts no mean. The first version of this converted with the
+    # dataset's mean and spread instead, and the 12.66 it printed meant 30 mm to
+    # the model rather than 20.
     ds = open_dataset(cfg.dataloader.dataset)
     names = list(ds.variables)
     if args.variable not in names:
         raise SystemExit(f"{args.variable!r} is not in the dataset: {names[:8]} ...")
     i = names.index(args.variable)
-
     stats = {k: float(v[i]) for k, v in ds.statistics.items()}
-    method = normaliser_for(cfg, args.variable)
-
-    # The dataset's own scale decides what the millimetre figure means to it.
     stored_units = classify_units(stats["maximum"])
     native = args.mm / 1000.0 if stored_units == "m" else args.mm
-    normalised = to_normalised(native, method, stats)
+
+    mul, add, source = model_normaliser(cfg, args.variable)
+    normalised = native * mul + add
 
     print("=== dataset the run will open")
     print(f"  states      {ds.shape[0]}")
     print(f"  dates       {ds.dates[0]} .. {ds.dates[-1]}")
-    print(f"  variables   {len(names)}")
     print(f"\n=== {args.variable}")
-    print(f"  normaliser  {method}")
-    print(f"  mean        {stats['mean']:.8g}")
-    print(f"  stdev       {stats['stdev']:.8g}")
-    print(f"  maximum     {stats['maximum']:.8g}  (stored in {stored_units})")
+    print(f"  dataset     mean {stats['mean']:.6g}, stdev {stats['stdev']:.6g}  (not used by the model)")
+    print(f"  model       normalised = x * {mul:.6g} + {add:.6g}  (from {Path(source).name})")
     print(f"\n=== threshold")
     print(f"  {args.mm:g} mm  =  {native:.8g} in stored units")
     print(f"\n  tail_threshold: {normalised:.8g}")
-    print("\nPaste that into bris/train/finetune_tail.yaml. For scale, the "
-          f"dataset maximum sits at {to_normalised(stats['maximum'], method, stats):.4g} "
-          "normalised; a threshold near that scores almost nothing.")
+
+    configured = configured_tail_threshold(cfg)
+    if configured is not None:
+        implied = (configured - add) / mul
+        implied_mm = implied * 1000.0 if stored_units == "m" else implied
+        print(f"\n  configured tail_threshold {configured:.8g} means {implied_mm:.2f} mm per 6 h")
+        if abs(configured - normalised) > 1e-3 * max(1.0, abs(normalised)):
+            print(f"\nTHE CONFIGURED THRESHOLD DOES NOT MEAN {args.mm:g} mm. Set it to "
+                  f"{normalised:.8g} or pass the --mm it was meant for.", file=sys.stderr)
+            return 3
     return 0
 
 
