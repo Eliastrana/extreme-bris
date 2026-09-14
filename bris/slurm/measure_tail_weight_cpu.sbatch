@@ -3,7 +3,7 @@
 #SBATCH --partition=defq
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --exclusive
+#SBATCH --cpus-per-task=128
 #SBATCH --time=14:00:00
 #SBATCH --output=logs/tailw-cpu-%j.out
 #SBATCH --error=logs/tailw-cpu-%j.err
@@ -19,8 +19,13 @@
 # does one state in about 43 minutes in full precision, so four shards on four
 # nodes finish all 46 states in roughly nine hours.
 #
-# --exclusive takes the whole node, because every core is used and a second
-# job sharing it would slow both down without either saying so.
+# CORES, NOT A WHOLE NODE. The first version asked for the node exclusively,
+# and one shard then waited two days for a defq node that had 18 of its 128
+# cores taken by someone else. Asking for cores lets a shard start on a node
+# that is nearly idle. The script uses exactly what it was given, since nproc
+# reports the allocation, so override the count with -c:
+#
+#   sbatch -p milanq -c 240 bris/slurm/measure_tail_weight_cpu.sbatch 3/4
 
 set -uo pipefail
 
