@@ -123,6 +123,19 @@ def main() -> int:
         print(f"  override {o}")
     cfg = _compose.compose(args.config_dir, args.config_name, overrides)
 
+    # The same patches the job applies, in the same way, so the dry run builds
+    # the model a real run builds.
+    from xbris import patches
+
+    print("\n=== patches")
+    try:
+        for name in patches.apply():
+            print(f"  applied  {name}")
+    except Exception:  # noqa: BLE001
+        print("\nFAILED applying the patches.\n", file=sys.stderr)
+        traceback.print_exc()
+        return 1
+
     from anemoi.training.train.train import AnemoiTrainer
 
     print("\n=== constructing the trainer")

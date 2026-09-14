@@ -70,7 +70,7 @@ CONFIG="$CONFIG_DIR/$CONFIG_NAME.yaml"
 # mechanism.
 export PYTHONPATH="$REPO_DIR${PYTHONPATH:+:$PYTHONPATH}"
 
-for f in "$VENV/bin/anemoi-training" "$CONFIG" \
+for f in "$VENV/bin/python" "$REPO_DIR/scripts/anemoi_train.py" "$CONFIG" \
          "$HOME/bris-runs/graphs/n320_2p5k_7p10.pt" \
          "${BRIS_CKPT:-$HOME/bris-models/bris-forecaster/bris-crpsfft_inference.ckpt}"; do
     [[ -e "$f" ]] || { echo "ERROR: missing $f" >&2; exit 1; }
@@ -146,7 +146,11 @@ mkdir -p "$OUT_DIR"
 cd "$OUT_DIR" || exit 1
 
 start=$(date +%s)
-"$VENV/bin/anemoi-training" train \
+# Not the installed anemoi-training command: the same entry point with
+# xbris.patches applied first, so the mapper activations are recomputed rather
+# than stored. Both arms go through here, so both get the same patches.
+export XBRIS_CHECKPOINT_MAPPERS="${XBRIS_CHECKPOINT_MAPPERS:-1}"
+"$VENV/bin/python" "$REPO_DIR/scripts/anemoi_train.py" train \
     --config-dir "$CONFIG_DIR" --config-name "$CONFIG_NAME" \
     hardware.num_gpus_per_node="$NGPU" \
     hardware.num_gpus_per_ensemble="$NGPU" \
