@@ -4,6 +4,14 @@
     scripts/measure_tail_weight.py --plan-only        # login node, seconds
     sbatch bris/slurm/measure_tail_weight.sbatch      # one H200, about twenty minutes
     scripts/measure_tail_weight.py --cpu --limit 1    # timing test on a CPU node
+    scripts/measure_tail_weight.py --cpu --shard 2/4  # one quarter of the states
+    scripts/measure_tail_weight.py --merge a.json b.json c.json d.json
+
+SHARDS. On a 128-core CPU node one state takes about 43 minutes, three members
+run one after another in full precision. All 46 on one node would be most of a
+day and a half, so the plan can be cut into shards that run on separate nodes
+and merged afterwards. A shard takes every n-th planned state, so each carries
+extreme and ordinary states in the same proportion.
 
 ON A CPU. The two H200s on this cluster can be held by week-long jobs, and
 nothing else has the memory. A measurement does not train, so it can run on a
@@ -76,6 +84,74 @@ def load_ranking(files: list[Path], start: str, end: str):
     return extreme, ordinary
 
 
+def summarise(rows: list[dict], n_window: int, n_ext_window: int, seconds: float) -> dict:
+    """The four numbers, from whatever states were measured."""
+
+    def mean(values):
+        values = [v for v in values if v is not None]
+        return float(np.mean(values)) if values else float("nan")
+
+    ext = [r for r in rows if r["kind"] == "extreme" and r.get("main") is not None]
+    ordn = [r for r in rows if r["kind"] == "ordinary" and r.get("main") is not None]
+    main_e, tail_e = mean(r["main"] for r in ext), mean(r["tail"] for r in ext)
+    main_o, tail_o = mean(r["main"] for r in ordn), mean(r["tail"] for r in ordn)
+    weight = main_e / tail_e if tail_e > 0 else float("inf")
+    ratios = [r["main"] / r["tail"] for r in ext if r["tail"]]
+    main_w = (n_ext_window * main_e + (n_window - n_ext_window) * main_o) / n_window
+    tail_w = (n_ext_window * tail_e + (n_window - n_ext_window) * tail_o) / n_window
+
+    def share(w):
+        return w * tail_w / (main_w + w * tail_w)
+
+    summary = {
+        "states_measured": len(rows),
+        "extreme_measured": len(ext), "ordinary_measured": len(ordn),
+        "seconds": round(seconds, 1),
+        "main_extreme": main_e, "tail_extreme": tail_e,
+        "main_ordinary": main_o, "tail_ordinary": tail_o,
+        "weight_equal_on_extremes": weight,
+        "weight_median_of_state_ratios": float(np.median(ratios)) if ratios else None,
+        "tail_over_main_ordinary": tail_o / main_o if ordn else None,
+        "mean_points_over_threshold_extreme": mean(r["n_exceed"] for r in ext),
+        "mean_fraction_over_threshold_extreme":
+            mean(r["n_exceed"] / r["n_points"] for r in ext if r.get("n_points")),
+        "mean_points_over_threshold_ordinary": mean(r["n_exceed"] for r in ordn),
+        "window_states": n_window, "window_extreme": n_ext_window,
+        "share_of_loss_at_weight": share(weight) if np.isfinite(weight) and ordn else None,
+        "share_of_loss_at_placeholder_100": share(100.0) if ordn else None,
+    }
+
+    print(f"\n{'date':20s} {'kind':9s} {'main':>9s} {'tail':>11s} {'ratio':>9s} {'>thr':>8s}")
+    for r in sorted(rows, key=lambda r: (r["kind"], r["date"])):
+        ratio = r["main"] / r["tail"] if r.get("tail") else float("inf")
+        print(f"{r['date']:20s} {r['kind']:9s} {r['main']:9.4f} {r['tail']:11.3e} "
+              f"{ratio:9.1f} {r['n_exceed']:8d}")
+
+    median = summary["weight_median_of_state_ratios"]
+    print(f"\n=== weight that makes the terms equal on extreme states: {weight:.1f}"
+          + (f"   (median of per-state ratios {median:.1f})" if median is not None else ""))
+    if ordn:
+        print(f"=== tail term on ordinary states: {tail_o:.3e}, "
+              f"{summary['tail_over_main_ordinary']:.2e} of the main term")
+    print(f"=== points over the threshold: {summary['mean_points_over_threshold_extreme']:.0f} "
+          f"on extreme states ({summary['mean_fraction_over_threshold_extreme']:.2e} of the grid)"
+          + (f", {summary['mean_points_over_threshold_ordinary']:.0f} on ordinary states" if ordn else ""))
+    if summary["share_of_loss_at_weight"] is not None:
+        print(f"=== tail share of the loss over the window: "
+              f"{summary['share_of_loss_at_weight']:.1%} at the measured weight, "
+              f"{summary['share_of_loss_at_placeholder_100']:.3%} at the placeholder 100")
+    print(f"=== {len(rows)} states, {seconds / max(len(rows), 1):.0f} s per state")
+    return summary
+
+
+def write(path: Path, summary: dict, rows: list[dict], n_window: int, n_ext_window: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"summary": summary, "states": rows,
+                                "window_states": n_window, "window_extreme": n_ext_window},
+                               indent=1))
+    print(f"wrote {path}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -93,11 +169,28 @@ def main() -> int:
                     help="run on the CPU, in full precision, with one thread per allocated core")
     ap.add_argument("--limit", type=int, default=None,
                     help="measure only the first N planned states, for timing")
+    ap.add_argument("--shard", default=None,
+                    help="k/n: measure every n-th planned state starting at the k-th (1-based)")
+    ap.add_argument("--merge", nargs="+", type=Path, default=None,
+                    help="combine shard outputs and report, without running anything")
     ap.add_argument("--plan-only", action="store_true",
                     help="map dates to samples and stop, without a model or a card")
     ap.add_argument("--out", type=Path,
                     default=Path.home() / "bris-runs/tail-weight/measure-local.json")
     args = ap.parse_args()
+
+    if args.merge:
+        rows, n_window, n_ext_window, seconds = [], None, None, 0.0
+        for f in args.merge:
+            part = json.loads(f.read_text())
+            rows += part["states"]
+            n_window = n_window or part["window_states"]
+            n_ext_window = n_ext_window or part["window_extreme"]
+            seconds += part["summary"].get("seconds", 0.0)
+        print(f"=== merged {len(args.merge)} file(s), {len(rows)} states")
+        summary = summarise(rows, n_window, n_ext_window, seconds)
+        write(args.out, summary, rows, n_window, n_ext_window)
+        return 0
 
     os.environ.setdefault("ANEMOI_BASE_SEED", "20260909")
     os.environ.setdefault("ANEMOI_INFERENCE_NUM_CHUNKS", "16")
@@ -175,6 +268,11 @@ def main() -> int:
           f"{sum(p['kind'] == 'ordinary' for p in plan)} ordinary")
     for kind, date in dropped:
         print(f"  dropped {kind} {date}: no usable sample has it as target")
+    if args.shard:
+        k, n = (int(x) for x in args.shard.split("/"))
+        plan = plan[k - 1::n]
+        print(f"  shard {k} of {n}: {sum(p['kind'] == 'extreme' for p in plan)} extreme, "
+              f"{sum(p['kind'] == 'ordinary' for p in plan)} ordinary")
     if args.limit:
         plan = plan[:args.limit]
         print(f"  limited to the first {len(plan)} planned state(s)")
@@ -246,67 +344,8 @@ def main() -> int:
         row["n_points"] = r.get("n_points")
         rows.append(row)
 
-    # ---- the four numbers ---------------------------------------------------
-    def mean(values):
-        values = [v for v in values if v is not None]
-        return float(np.mean(values)) if values else float("nan")
-
-    ext = [r for r in rows if r["kind"] == "extreme"]
-    ordn = [r for r in rows if r["kind"] == "ordinary"]
-    main_e, tail_e = mean(r["main"] for r in ext), mean(r["tail"] for r in ext)
-    main_o, tail_o = mean(r["main"] for r in ordn), mean(r["tail"] for r in ordn)
-    weight = main_e / tail_e if tail_e > 0 else float("inf")
-    ratios = [r["main"] / r["tail"] for r in ext if r["tail"]]
-    n_ext_window = len(extreme)
-    main_w = (n_ext_window * main_e + (n_window - n_ext_window) * main_o) / n_window
-    tail_w = (n_ext_window * tail_e + (n_window - n_ext_window) * tail_o) / n_window
-
-    def share(w):
-        return w * tail_w / (main_w + w * tail_w)
-
-    exceed_frac = mean(r["n_exceed"] / r["n_points"] for r in ext if r["n_points"])
-
-    summary = {
-        "states_measured": len(rows),
-        "seconds": round(elapsed, 1),
-        "main_extreme": main_e, "tail_extreme": tail_e,
-        "main_ordinary": main_o, "tail_ordinary": tail_o,
-        "weight_equal_on_extremes": weight,
-        "weight_median_of_state_ratios": float(np.median(ratios)) if ratios else None,
-        "tail_over_main_ordinary": tail_o / main_o if main_o else None,
-        "mean_points_over_threshold_extreme": mean(r["n_exceed"] for r in ext),
-        "mean_fraction_over_threshold_extreme": exceed_frac,
-        "mean_points_over_threshold_ordinary": mean(r["n_exceed"] for r in ordn),
-        "window_states": n_window, "window_extreme": n_ext_window,
-        "share_of_loss_at_weight": share(weight) if np.isfinite(weight) else None,
-        "share_of_loss_at_placeholder_100": share(100.0),
-    }
-
-    print(f"\n{'date':20s} {'kind':9s} {'main':>9s} {'tail':>11s} {'ratio':>9s} {'>thr':>8s}")
-    for r in rows:
-        ratio = r["main"] / r["tail"] if r["tail"] else float("inf")
-        print(f"{r['date']:20s} {r['kind']:9s} {r['main']:9.4f} {r['tail']:11.3e} "
-              f"{ratio:9.1f} {r['n_exceed']:8d}")
-
-    median = summary["weight_median_of_state_ratios"]
-    print(f"\n=== weight that makes the terms equal on extreme states: {weight:.1f}"
-          + (f"   (median of per-state ratios {median:.1f})" if median is not None else ""))
-    if ordn:
-        print(f"=== tail term on ordinary states: {tail_o:.3e}, "
-              f"{summary['tail_over_main_ordinary']:.2e} of the main term")
-    print(f"=== points over the threshold on extreme states: "
-          f"{summary['mean_points_over_threshold_extreme']:.0f} on average, "
-          f"{exceed_frac:.2e} of the grid; ordinary states "
-          f"{summary['mean_points_over_threshold_ordinary']:.0f}")
-    print(f"=== tail share of the loss over the window: "
-          f"{summary['share_of_loss_at_weight']:.1%} at the measured weight, "
-          f"{summary['share_of_loss_at_placeholder_100']:.2%} at the placeholder 100")
-    print(f"=== {len(rows)} states in {elapsed / 60:.1f} min, "
-          f"{elapsed / max(len(rows), 1):.0f} s per state")
-
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps({"summary": summary, "states": rows}, indent=1))
-    print(f"wrote {args.out}")
+    summary = summarise(rows, n_window, len(extreme), elapsed)
+    write(args.out, summary, rows, n_window, len(extreme))
     return 0
 
 
