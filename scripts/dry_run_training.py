@@ -3,6 +3,12 @@
 
     scripts/dry_run_training.py finetune_tail
     scripts/dry_run_training.py finetune
+    scripts/dry_run_training.py finetune_tail model.cpu_offload=True
+
+Anything after the config name is passed on as an override, exactly as the job
+script passes it. Test the overrides here before submitting them: the first
+attempt to offload activations went through the queue and died building the
+model, which is squarely inside what this catches.
 
 WHY. Getting a card on this cluster has taken anywhere from thirty seconds to
 several days. Spending that wait to discover a missing config key is the worst
@@ -80,6 +86,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("config_name", nargs="?", default="finetune_tail")
+    ap.add_argument("overrides", nargs="*",
+                    help="Hydra overrides, as given to the job script")
     ap.add_argument("--config-dir", type=Path, default=REPO.parent / "bris" / "train")
     ap.add_argument("--quiet", action="store_true",
                     help="suppress anemoi's own INFO logging")
@@ -105,7 +113,11 @@ def main() -> int:
         print(f"note: ANEMOI_BASE_SEED unset; using {BASE_SEED}, "
               "the same value the job script uses\n")
 
-    overrides = [] if args.keep_gpu_settings else CPU_OVERRIDES
+    # The caller's overrides first, the CPU pins last, because Hydra takes the
+    # last value given. An override like hardware.num_gpus_per_model=4 belongs
+    # to the card, and letting it through here would test a shape the CPU
+    # cannot take rather than the model the override describes.
+    overrides = list(args.overrides) + ([] if args.keep_gpu_settings else CPU_OVERRIDES)
     print(f"=== composing {args.config_name}")
     for o in overrides:
         print(f"  override {o}")
