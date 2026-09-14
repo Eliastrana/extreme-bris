@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=finetune
-#SBATCH --partition=a100q
+#SBATCH --partition=h200q
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:2
-#SBATCH --time=2-00:00:00
+#SBATCH --gres=gpu:1
+#SBATCH --time=4-00:00:00
 #SBATCH --output=logs/finetune-%j.out
 #SBATCH --error=logs/finetune-%j.err
 #
@@ -36,6 +36,10 @@
 # THE SEED IS FIXED AND SHARED. Both arms have to draw the same samples in the
 # same order, or part of any difference between them is which states each one
 # happened to see. This is the cheapest control in the whole design.
+#
+# ONE H200. The model does not fit in 40 GB, and multi-card shapes are
+# unobtainable on this cluster; three members fit on one 140 GB H200 with the
+# patches in xbris/patches.py. The partition list below is kept for reference.
 #
 # THE GRES ASKS FOR CARDS, NOT FOR A100s. Naming the type pins the job to
 # a100q, which is two cards in the whole cluster, and the queue there is deep.
@@ -109,12 +113,14 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # Read once, when anemoi.models is imported, so it must be set before Python
 # starts. Keep it equal to num_chunks in bris/train/finetune.yaml.
 export ANEMOI_INFERENCE_NUM_CHUNKS="${ANEMOI_INFERENCE_NUM_CHUNKS:-16}"
+# The mappers need more pieces than the processor, as in the config.
+export ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER="${ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER:-32}"
 
 export NCCL_P2P_DISABLE=1
 export HYDRA_FULL_ERROR=1
 export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-20260909}"
 echo "=== seed    : $ANEMOI_BASE_SEED"
-echo "=== chunks  : $ANEMOI_INFERENCE_NUM_CHUNKS outside training"
+echo "=== chunks  : $ANEMOI_INFERENCE_NUM_CHUNKS outside training, mappers $ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER"
 
 # Units, before anything expensive. The MEPS recipe renames
 # precipitation_amount_acc to tp without rescaling kg/m2 to metres, and if

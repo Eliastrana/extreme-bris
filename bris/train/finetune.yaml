@@ -107,12 +107,19 @@ model:
   # This is the right knob to reach for before the ensemble size, because
   # ensemble size changes what is being measured and this does not. Four
   # members on one card stays.
+  #
+  # The mappers use 32. They are the parts that work on the full data grid,
+  # and at sixteen the attention held more than the card had left once the
+  # other members' stored activations were counted. The processor works on the
+  # much smaller hidden mesh and stays at sixteen. Outside training anemoi
+  # ignores these entirely and reads ANEMOI_INFERENCE_NUM_CHUNKS(_MAPPER) from
+  # the environment; bris/slurm/finetune.sbatch sets both to match.
   processor:
     num_chunks: 16
   encoder:
-    num_chunks: 16
+    num_chunks: 32
   decoder:
-    num_chunks: 16
+    num_chunks: 32
 
 dataloader:
   # The year files are contiguous and share a frequency, so they concatenate:
@@ -214,14 +221,15 @@ training:
   # ENSEMBLE SIZE IS NOT A TUNING KNOB HERE. Kernel CRPS on a single member
   # collapses to absolute error, absolute error is minimised by the median,
   # and a median-seeking model under-forecasting the tail is the entire
-  # problem being studied. A run at one member cannot test the hypothesis
-  # whichever loss it uses.
+  # problem being studied. anemoi refuses a single member outright.
   #
-  # Total members are ensemble_size_per_device * num_gpus_per_ensemble, so on
-  # a single A100 this is the whole ensemble. If it runs out of memory, the
-  # answer is more cards, or fewer channels, or a shorter rollout. It is not
-  # fewer members.
-  ensemble_size_per_device: 4
+  # THREE, BECAUSE THAT IS WHAT ONE CARD HOLDS. MET trained this with eight
+  # GPUs per member; this cluster hands out single cards. On one 140 GB H200,
+  # with members run through the model one at a time (xbris/patches.py), three
+  # members trained with 142,987 of 143,771 MiB at peak, and four ran out in
+  # the decoder's feed-forward layer. Three is the largest ensemble available
+  # here, and both arms use it, so the comparison between them is unaffected.
+  ensemble_size_per_device: 3
 
   max_epochs: null
   max_steps: 3000
