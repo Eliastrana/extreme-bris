@@ -94,10 +94,27 @@ echo "=== memory  : $(free -g | awk 'NR==2{print $7" GB available of "$2" GB"}')
 # let the allocator grow a block instead of hunting for a contiguous one.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
+# CHUNKING HAS TO BE SET TWICE, AND THE SECOND PLACE IS NOT THE CONFIG.
+# anemoi's attention blocks read model.*.num_chunks only while training:
+#
+#     num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_MAPPER
+#
+# and that constant comes from this environment variable, defaulting to one.
+# Validation, including the sanity check Lightning runs before the first step,
+# is not training. So every run here built the encoder's entire edge tensor in
+# one piece during validation, whatever the config said, and both memory
+# failures landed exactly there. Raising num_chunks from four to sixteen left
+# the failed allocation at 23.96 GB to the byte, which is how it showed.
+#
+# Read once, when anemoi.models is imported, so it must be set before Python
+# starts. Keep it equal to num_chunks in bris/train/finetune.yaml.
+export ANEMOI_INFERENCE_NUM_CHUNKS="${ANEMOI_INFERENCE_NUM_CHUNKS:-16}"
+
 export NCCL_P2P_DISABLE=1
 export HYDRA_FULL_ERROR=1
 export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-20260909}"
 echo "=== seed    : $ANEMOI_BASE_SEED"
+echo "=== chunks  : $ANEMOI_INFERENCE_NUM_CHUNKS outside training"
 
 # Units, before anything expensive. The MEPS recipe renames
 # precipitation_amount_acc to tp without rescaling kg/m2 to metres, and if
