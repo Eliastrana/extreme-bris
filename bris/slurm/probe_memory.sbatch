@@ -9,48 +9,71 @@
 #SBATCH --output=logs/probe-mem-%j.out
 #SBATCH --error=logs/probe-mem-%j.err
 #
-# How many ensemble members fit on one card, and how long a step takes.
+# Find a configuration that fits on one card, and what a step costs there.
 #
 #   mkdir -p logs && sbatch bris/slurm/probe_memory.sbatch
-#   SIZES="4 3 2" sbatch bris/slurm/probe_memory.sbatch
 #
-# WHY ONE JOB TRIES SEVERAL SIZES. A card on this cluster has taken anywhere
-# from thirty seconds to a quoted six days. Submitting one ensemble size per job
-# and waiting for each verdict in turn could take weeks to learn one number.
-# So this tries the largest size first, stops at the first that runs, and only
-# falls back to a smaller one when the larger ran out of memory. Any other
-# failure stops it, because a smaller ensemble would not fix a broken config and
-# the slot is better spent reading the traceback.
+#   CONFIGS="training.ensemble_size_per_device=4;
+#            training.ensemble_size_per_device=2;
+#            training.ensemble_size_per_device=2 model.processor.cpu_offload=True" \
+#   EXTRA="model.encoder.num_chunks=32 model.decoder.num_chunks=32" \
+#   ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER=32 \
+#   sbatch bris/slurm/probe_memory.sbatch
+#
+# CONFIGS is a semicolon-separated list of override sets, tried in order.
+# EXTRA is added to every one of them. Without CONFIGS it falls back to SIZES,
+# a list of ensemble sizes, which is how it started.
+#
+# WHY ONE JOB TRIES SEVERAL. A card on this cluster has taken anywhere from
+# thirty seconds to a quoted six days. One configuration per job, waiting for
+# each verdict in turn, could take weeks to learn one number. So this tries the
+# most wanted configuration first, stops at the first that runs, and only moves
+# on when the previous one ran out of memory. Any other failure stops it,
+# because a smaller configuration would not fix a broken one and the slot is
+# better spent reading the traceback.
 #
 # WHAT IT RECORDS. Peak card memory for each attempt, sampled by nvidia-smi
-# while it runs, and the time per step from the last attempt. Those two numbers
-# decide the real run: how many members it can afford, and how many steps fit
-# in a walltime.
+# while it runs; the last training rate and loss it reported; and the tail
+# term's own value, which is what sets its weight in the combined loss.
 #
-# Run scripts/dry_run_training.py first. Nothing here should fail before the
-# first batch; if it does, that was a queue slot spent on something the login
-# node could have told you.
+# Run scripts/dry_run_training.py with the same overrides first. Nothing here
+# should fail before the first batch.
 
 set -uo pipefail
 
 REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
-SIZES="${SIZES:-4 2}"
 STEPS="${STEPS:-5}"
 ARM="${ARM:-finetune_tail}"
+EXTRA="${EXTRA:-}"
 cd "$REPO_DIR" || exit 1
 mkdir -p logs
 
-echo "=== node   : $(hostname)"
-echo "=== card   : $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
-echo "=== sizes  : $SIZES (largest first, stopping at the first that fits)"
-echo "=== steps  : $STEPS per attempt"
+if [[ -n "${CONFIGS:-}" ]]; then
+    IFS=';' read -ra attempts <<< "$CONFIGS"
+else
+    attempts=()
+    for n in ${SIZES:-4 2}; do
+        attempts+=("training.ensemble_size_per_device=$n")
+    done
+fi
+read -ra extra_args <<< "$EXTRA"
+
+echo "=== node    : $(hostname)"
+echo "=== card    : $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader)"
+echo "=== steps   : $STEPS per attempt"
+echo "=== extra   : ${EXTRA:-none}"
+echo "=== mapper chunks outside training: ${ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER:-as ANEMOI_INFERENCE_NUM_CHUNKS}"
+for i in "${!attempts[@]}"; do
+    echo "=== try $((i + 1))   : $(echo "${attempts[$i]}" | xargs)"
+done
 
 verdict="none fit"
-for n in $SIZES; do
-    attempt="logs/probe-mem-${SLURM_JOB_ID:-local}-ens$n.log"
+for i in "${!attempts[@]}"; do
+    read -ra spec_args <<< "${attempts[$i]}"
+    attempt="logs/probe-mem-${SLURM_JOB_ID:-local}-try$((i + 1)).log"
     samples="$(mktemp)"
     echo
-    echo "=== ensemble $n"
+    echo "=== try $((i + 1)): ${spec_args[*]}"
 
     nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits -l 2 > "$samples" &
     smi=$!
@@ -58,9 +81,10 @@ for n in $SIZES; do
     start=$(date +%s)
     bash bris/slurm/finetune.sbatch "$ARM" \
         training.max_steps="$STEPS" \
-        training.ensemble_size_per_device="$n" \
         dataloader.limit_batches.training="$STEPS" \
         dataloader.limit_batches.validation=1 \
+        ${extra_args[@]+"${extra_args[@]}"} \
+        ${spec_args[@]+"${spec_args[@]}"} \
         > "$attempt" 2>&1
     rc=$?
     elapsed=$(( $(date +%s) - start ))
@@ -69,20 +93,25 @@ for n in $SIZES; do
     peak=$(sort -n "$samples" | tail -1); rm -f "$samples"
 
     echo "  exit $rc after ${elapsed}s, peak card memory ${peak:-?} MiB"
-    rate=$(grep -oE '[0-9.]+(s/it|it/s)' "$attempt" | tail -1)
-    [[ -n "$rate" ]] && echo "  last reported rate: $rate"
-    grep -E "tail term, forward" "$attempt" | tail -2 | sed 's/^/  /'
+    # Rates from the sanity check are validation, not training; only trust
+    # the ones on Epoch lines.
+    rate=$(grep -E "^Epoch|Epoch 0" "$attempt" | grep -oE '[0-9.]+(s/it|it/s)' | tail -1)
+    [[ -n "$rate" ]] && echo "  last training rate: $rate"
+    loss=$(grep -oE 'train_[a-z_]*loss[a-z_]*=[0-9.eE+-]+' "$attempt" | tail -2 | xargs)
+    [[ -n "$loss" ]] && echo "  last training loss: $loss"
+    grep -E "tail term, forward" "$attempt" | tail -3 | sed -E 's/.*reported: /  tail term: /; s/ \(before.*//'
 
     if [[ $rc -eq 0 ]]; then
-        verdict="ensemble $n fits"
+        verdict="try $((i + 1)) fits: ${spec_args[*]}"
         break
     fi
     if grep -q "OutOfMemoryError" "$attempt"; then
-        echo "  out of memory; trying the next size down"
+        where=$(grep -oE 'anemoi/models/(layers|models)/[a-z_]+\.py", line [0-9]+' "$attempt" | tail -1)
+        echo "  out of memory${where:+ at $where}; trying the next"
         continue
     fi
     echo "  failed for a reason other than memory. Stopping; read $attempt"
-    verdict="stopped at ensemble $n: not a memory failure"
+    verdict="stopped at try $((i + 1)): not a memory failure"
     break
 done
 
