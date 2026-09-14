@@ -147,9 +147,9 @@ cd "$OUT_DIR" || exit 1
 
 start=$(date +%s)
 # Not the installed anemoi-training command: the same entry point with
-# xbris.patches applied first, so the mapper activations are recomputed rather
-# than stored. Both arms go through here, so both get the same patches.
-export XBRIS_CHECKPOINT_MAPPERS="${XBRIS_CHECKPOINT_MAPPERS:-1}"
+# xbris.patches applied first, so ensemble members run through the model one at
+# a time. Both arms go through here, so both get the same patches.
+export XBRIS_SEQUENTIAL_MEMBERS="${XBRIS_SEQUENTIAL_MEMBERS:-1}"
 "$VENV/bin/python" "$REPO_DIR/scripts/anemoi_train.py" train \
     --config-dir "$CONFIG_DIR" --config-name "$CONFIG_NAME" \
     hardware.num_gpus_per_node="$NGPU" \
