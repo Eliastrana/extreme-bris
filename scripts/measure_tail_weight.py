@@ -3,6 +3,13 @@
 
     scripts/measure_tail_weight.py --plan-only        # login node, seconds
     sbatch bris/slurm/measure_tail_weight.sbatch      # one H200, about twenty minutes
+    scripts/measure_tail_weight.py --cpu --limit 1    # timing test on a CPU node
+
+ON A CPU. The two H200s on this cluster can be held by week-long jobs, and
+nothing else has the memory. A measurement does not train, so it can run on a
+CPU node with terabytes of memory instead, in full precision. The ratio
+between the two loss terms does not depend on the precision the forward pass
+used, only on the states and the weights.
 
 WHY. The tail arm adds a threshold-weighted CRPS term to Bris's own loss, at a
 weight that is still the placeholder 100. The only reading so far came from the
@@ -82,6 +89,10 @@ def main() -> int:
     ap.add_argument("--ordinary", type=int, default=None,
                     help="ordinary states to draw (default: as many as extreme)")
     ap.add_argument("--seed", type=int, default=20260909)
+    ap.add_argument("--cpu", action="store_true",
+                    help="run on the CPU, in full precision, with one thread per allocated core")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="measure only the first N planned states, for timing")
     ap.add_argument("--plan-only", action="store_true",
                     help="map dates to samples and stop, without a model or a card")
     ap.add_argument("--out", type=Path,
@@ -120,8 +131,14 @@ def main() -> int:
         "hardware.num_gpus_per_ensemble=1",
         "hardware.num_gpus_per_model=1",
     ]
-    if args.plan_only:
+    if args.plan_only or args.cpu:
         overrides.append("hardware.accelerator=cpu")
+    if args.cpu:
+        import torch
+
+        threads = int(os.environ.get("SLURM_CPUS_PER_TASK") or os.cpu_count() or 1)
+        torch.set_num_threads(threads)
+        print(f"  CPU run, {threads} threads, full precision")
     cfg = _compose.compose(REPO / "bris/train", args.config_name, overrides)
 
     from anemoi.training.train.train import AnemoiTrainer
@@ -158,6 +175,9 @@ def main() -> int:
           f"{sum(p['kind'] == 'ordinary' for p in plan)} ordinary")
     for kind, date in dropped:
         print(f"  dropped {kind} {date}: no usable sample has it as target")
+    if args.limit:
+        plan = plan[:args.limit]
+        print(f"  limited to the first {len(plan)} planned state(s)")
     check = plan[0]
     print(f"  check: {check['date']} -> sample start {dates[check['start']]}, "
           f"target {dates[check['start'] + target_offset]}")
@@ -202,7 +222,7 @@ def main() -> int:
         strategy=trainer.strategy,
         devices=1,
         num_nodes=1,
-        precision=cfg.training.precision,
+        precision="32" if args.cpu else cfg.training.precision,
         logger=False,
         callbacks=[],
         enable_checkpointing=False,
@@ -268,10 +288,12 @@ def main() -> int:
         print(f"{r['date']:20s} {r['kind']:9s} {r['main']:9.4f} {r['tail']:11.3e} "
               f"{ratio:9.1f} {r['n_exceed']:8d}")
 
+    median = summary["weight_median_of_state_ratios"]
     print(f"\n=== weight that makes the terms equal on extreme states: {weight:.1f}"
-          f"   (median of per-state ratios {summary['weight_median_of_state_ratios']:.1f})")
-    print(f"=== tail term on ordinary states: {tail_o:.3e}, "
-          f"{summary['tail_over_main_ordinary']:.2e} of the main term")
+          + (f"   (median of per-state ratios {median:.1f})" if median is not None else ""))
+    if ordn:
+        print(f"=== tail term on ordinary states: {tail_o:.3e}, "
+              f"{summary['tail_over_main_ordinary']:.2e} of the main term")
     print(f"=== points over the threshold on extreme states: "
           f"{summary['mean_points_over_threshold_extreme']:.0f} on average, "
           f"{exceed_frac:.2e} of the grid; ordinary states "
@@ -279,7 +301,8 @@ def main() -> int:
     print(f"=== tail share of the loss over the window: "
           f"{summary['share_of_loss_at_weight']:.1%} at the measured weight, "
           f"{summary['share_of_loss_at_placeholder_100']:.2%} at the placeholder 100")
-    print(f"=== {len(rows)} states in {elapsed / 60:.1f} min")
+    print(f"=== {len(rows)} states in {elapsed / 60:.1f} min, "
+          f"{elapsed / max(len(rows), 1):.0f} s per state")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps({"summary": summary, "states": rows}, indent=1))
