@@ -31,6 +31,28 @@ step for most of their stored activations. Offloading would have moved those
 same tensors across PCIe twice per step, and the processor showed what that
 costs.
 
+RECOMPUTING THE WHOLE BLOCK WAS NOT ENOUGH, SO THE ATTENTION IS CHECKPOINTED
+PER CHUNK AS WELL.
+
+With the block recomputed, two members still ran out, at nearly the same peak,
+but somewhere new: inside torch.utils.checkpoint's unpack_hook, recomputing the
+mapper block during the backward pass. The forward pass had completed for the
+first time. What was left is that recomputing a block rematerialises all of
+that block's activations at once while its gradient is taken, and the mapper
+splits its attention into num_chunks pieces only to keep every piece anyway.
+
+So inside a mapper block, each call to the attention convolution is also
+checkpointed. The backward pass then recomputes one chunk at a time, and the
+peak is one chunk rather than one block. It applies only inside mapper blocks:
+the processor already recomputes its layers, and checkpointing its attention
+again would compute it three times per step for nothing.
+
+Knowing whether a convolution is inside a mapper needs a flag set by the block
+itself, and it has to be set during the recompute too, not only during the
+original forward. The backward pass runs outside the wrapper that first called
+the block, often on another thread, so the flag is set by the function that
+checkpoint calls, which is also the function it calls again to recompute.
+
 The patch is found rather than named. The mapper block is the class whose
 forward switches to NUM_CHUNKS_INFERENCE_MAPPER outside training, which is a
 property of its code rather than of a class name that may move between anemoi
@@ -40,11 +62,17 @@ nothing and letting a run fail on memory for a reason already solved.
 
 from __future__ import annotations
 
+import contextvars
 import inspect
 import os
 import sys
 
 _APPLIED: list[str] = []
+
+# True while a mapper block is running, including when checkpoint re-runs it
+# during the backward pass. Read by the attention patch.
+_IN_MAPPER: contextvars.ContextVar[bool] = contextvars.ContextVar("xbris_in_mapper",
+                                                                  default=False)
 
 
 def _mapper_block_classes() -> list[type]:
@@ -84,12 +112,21 @@ def checkpoint_mappers() -> list[str]:
             continue
         original = cls.forward
 
-        def forward(self, *args, _original=original, **kwargs):
+        def run(self, *args, _original=original, **kwargs):
+            # The flag is set here, in the function checkpoint calls, so that it
+            # is also set when checkpoint calls it again to recompute.
+            token = _IN_MAPPER.set(True)
+            try:
+                return _original(self, *args, **kwargs)
+            finally:
+                _IN_MAPPER.reset(token)
+
+        def forward(self, *args, _run=run, _original=original, **kwargs):
             # Only when a backward pass will follow. Validation and inference
             # store nothing, so recomputing there would cost time for no gain.
             if self.training and torch.is_grad_enabled():
-                return checkpoint(_original, self, *args, use_reentrant=False, **kwargs)
-            return _original(self, *args, **kwargs)
+                return checkpoint(_run, self, *args, use_reentrant=False, **kwargs)
+            return _run(self, *args, **kwargs)
 
         forward._xbris_checkpointed = True
         forward.__wrapped__ = original
@@ -98,17 +135,49 @@ def checkpoint_mappers() -> list[str]:
     return list(_APPLIED)
 
 
+def checkpoint_mapper_attention() -> list[str]:
+    """Checkpoint each attention call inside a mapper, so chunks recompute singly."""
+    import torch
+    from torch.utils.checkpoint import checkpoint
+    from anemoi.models.layers import conv
+
+    cls = getattr(conv, "GraphTransformerConv", None)
+    if cls is None or "forward" not in cls.__dict__:
+        raise RuntimeError(
+            "anemoi.models.layers.conv.GraphTransformerConv is not there. Every "
+            "out-of-memory traceback so far ran through it; this anemoi differs "
+            "from the one the patch was written against."
+        )
+    if getattr(cls.forward, "_xbris_checkpointed", False):
+        return [f"{cls.__name__}.forward"]
+    original = cls.forward
+
+    def forward(self, *args, _original=original, **kwargs):
+        if _IN_MAPPER.get() and self.training and torch.is_grad_enabled():
+            return checkpoint(_original, self, *args, use_reentrant=False, **kwargs)
+        return _original(self, *args, **kwargs)
+
+    forward._xbris_checkpointed = True
+    forward.__wrapped__ = original
+    cls.forward = forward
+    _APPLIED.append(f"{cls.__name__}.forward, inside mappers only")
+    return [f"{cls.__name__}.forward"]
+
+
 def apply() -> list[str]:
     """Apply every patch this project needs. Safe to call more than once.
 
-    XBRIS_CHECKPOINT_MAPPERS=0 turns the mapper patch off, for measuring what it
-    costs. Leave it on for both arms or off for both.
+    XBRIS_CHECKPOINT_MAPPERS=0 turns both mapper patches off, and
+    XBRIS_CHECKPOINT_ATTENTION=0 only the per-chunk one, for measuring what each
+    costs. Whatever is chosen, choose it for both arms.
     """
-    applied: list[str] = []
     if os.environ.get("XBRIS_CHECKPOINT_MAPPERS", "1") != "0":
-        applied = checkpoint_mappers()
-        print(f"xbris: recomputing activations in {', '.join(applied)}",
+        checkpoint_mappers()
+        # Without the block patch there is no flag, so this would do nothing.
+        if os.environ.get("XBRIS_CHECKPOINT_ATTENTION", "1") != "0":
+            checkpoint_mapper_attention()
+        print(f"xbris: recomputing activations in {'; '.join(_APPLIED)}",
               file=sys.stderr)
     else:
         print("xbris: mapper checkpointing is OFF", file=sys.stderr)
-    return applied
+    return list(_APPLIED)
