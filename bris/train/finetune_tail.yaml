@@ -124,11 +124,27 @@ training:
 
     scalers: ['*']
 
-    # THE THIRD WEIGHT IS A PLACEHOLDER AND SHOULD BE MEASURED, NOT GUESSED.
-    # The estimator averages over all output channels and this term is nonzero
-    # on one of them, so its raw value lands roughly two orders of magnitude
-    # below the main term. The loss logs its own value on the first five
-    # forward passes for exactly this reason: read those against the main
-    # term in the same log, then set this so the tail is a deliberate
-    # fraction of the total rather than an accident of channel count.
-    loss_weights: [1.0, 100.0]
+    # MEASURED, NOT GUESSED: scripts/measure_tail_weight.py, 2026-09-15, with
+    # the corrected threshold and the Nordic-only weights above. The result is
+    # kept in results/tail-weight/measure-cpu-merged.json.
+    #
+    # The untouched warm-start model was run over the 23 extreme states the
+    # ranking flagged in the training window and 23 ordinary states drawn at
+    # random from it: three members, no gradients, each loss term recorded on
+    # its own. On extreme states the main term averaged 1.91 and the tail term
+    # 1.40e-4, so a weight of 13,716 makes the two equal where the tail
+    # matters. On ordinary states the tail term averaged 2.6e-5, a fifth of
+    # that, and on 15 of the 23 it was below 1e-5.
+    #
+    # At this weight the tail term is about half the loss on an extreme state
+    # and, estimated over the whole window, 16.5 percent of it on average. At
+    # the old placeholder of 100 it would have been 0.14 percent: the tail arm
+    # would have been the control arm with extra arithmetic.
+    #
+    # The estimate is heavy-tailed. Four extreme states carry about half of
+    # the mean, and a few ordinary draws held real Nordic downpours of their
+    # own, being ordinary only by the ranking's area-based measure. The median
+    # of the per-state ratios is 21,132. The ratio of means is used on
+    # purpose: the weight should balance the terms where heavy rain actually
+    # is, and that is where the mean is carried.
+    loss_weights: [1.0, 13716.0]
