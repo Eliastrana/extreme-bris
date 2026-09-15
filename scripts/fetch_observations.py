@@ -262,7 +262,7 @@ def main() -> int:
             element=element, unit=unit, start=args.start, end=args.end,
         )
         filled = float(np.isfinite(grid).mean())
-        print(f"\n  {name}: {len(seen_ids)} stations x {len(times)} hours, "
+        print(f"\n  {name}: {len(seen_ids)} stations x {len(times)} reports, "
               f"{filled:.1%} present")
         print(f"  wrote {out} ({out.stat().st_size / 1e6:.1f} MB)\n")
 
