@@ -223,6 +223,8 @@ def main() -> int:
     ap.add_argument("--max-dist-km", type=float, default=5.0)
     ap.add_argument("--tail-mm", type=float, default=20.0,
                     help="a valid time counts as tail if any gauge passed this")
+    ap.add_argument("--no-screen", action="store_true",
+                    help="keep gauges flagged by check_gauges.py")
     ap.add_argument("-o", "--out", type=Path, default=None)
     args = ap.parse_args()
 
@@ -232,6 +234,21 @@ def main() -> int:
     var, convert = VARIABLES[args.element]
     label = args.label or args.forecasts[0].parent.name
     print(f"=== {label}: {len(args.forecasts)} forecast file(s), {args.element}\n")
+
+    # Gauges check_gauges.py found broken are blanked, not reindexed, so every
+    # arm is scored on the same stations by the same alignment. Read by default
+    # rather than on request: a screen one arm forgot would be a difference
+    # between arms that has nothing to do with the arms.
+    screen = args.observations / f"{args.element}_check.json"
+    screened_out: list[str] = []
+    if screen.exists() and not args.no_screen:
+        flagged = json.loads(screen.read_text())["flagged"]
+        drop = np.isin(obs["stations"], list(flagged))
+        obs["values"] = np.array(obs["values"], dtype="float32", copy=True)
+        obs["values"][drop] = np.nan
+        screened_out = sorted(str(s) for s in obs["stations"][drop])
+        print(f"  screened out {len(screened_out)} gauge(s) flagged in {screen.name}"
+              f" (--no-screen keeps them)\n")
 
     fc_all, ob_all, lead_all, all_times = [], [], [], []
     convention = None
@@ -313,6 +330,7 @@ def main() -> int:
         "element": args.element,
         "accumulation": convention,
         "tail_mm": args.tail_mm,
+        "screened_out": screened_out,
         "files": [str(p) for p in args.forecasts],
         "all": score(fc, ob),
         "tail": score(fc[tail_pairs], ob[tail_pairs]),
