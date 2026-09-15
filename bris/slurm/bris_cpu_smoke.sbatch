@@ -55,8 +55,11 @@ OUTPUT_DIR="${BRIS_OUTPUT_DIR:-$HOME/bris-runs/cpu-smoke/${STAMP}Z-${TAG}}"
 export BRIS_OUTPUT_DIR="$OUTPUT_DIR"
 
 # No GPU, and say so to everything that asks. devices=1 is one CPU process.
+# SLURM_GPUS_PER_NODE, which the config reads as the device count, is set on the
+# bris process only, below. Exported here, srun reads it as a GPU request of its
+# own and refuses the step: "Step requested GRES but job doesn't have GRES".
 export CUDA_VISIBLE_DEVICES=""
-export SLURM_GPUS_PER_NODE=1
+unset SLURM_GPUS_PER_NODE
 export BRIS_GPUS_PER_MODEL=1
 export SLURM_NNODES="${SLURM_NNODES:-1}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-96}"
@@ -99,7 +102,7 @@ echo
 
 cd "$ENV_DIR"
 start=$SECONDS
-srun uv run bris \
+srun env SLURM_GPUS_PER_NODE=1 uv run bris \
   --config "$RUN_CONFIG" \
   -sd "$DATE" \
   -ed "$DATE" \
