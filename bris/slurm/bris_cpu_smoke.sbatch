@@ -102,7 +102,11 @@ echo
 
 cd "$ENV_DIR"
 start=$SECONDS
-srun env SLURM_GPUS_PER_NODE=1 uv run bris \
+# The environment's own entry point, not `uv run`: uv lives in ~/.local/bin,
+# which is on PATH in a login shell and not in a batch job, where this failed
+# with "env: 'uv': No such file or directory". It adds nothing here anyway; the
+# environment is already built.
+srun env SLURM_GPUS_PER_NODE=1 "$ENV_DIR/.venv/bin/bris" \
   --config "$RUN_CONFIG" \
   -sd "$DATE" \
   -ed "$DATE" \
