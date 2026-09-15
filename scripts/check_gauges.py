@@ -68,10 +68,12 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("observations", type=Path)
+    ap.add_argument("--max-quality", type=int, default=4,
+                    help="blank values Frost codes worse than this first (default 4)")
     ap.add_argument("-o", "--out", type=Path, default=None)
     args = ap.parse_args()
 
-    obs = load_observations(args.observations)
+    obs = load_observations(args.observations, max_quality=args.max_quality)
     v = obs["values"].astype("float64")
     times, st = obs["times"], obs["stations"]
     step_h = int(np.median(np.diff(times)) / np.timedelta64(1, "h"))
@@ -80,6 +82,9 @@ def main() -> int:
     big_run, long_run, wet_limit, big_mm = LIMITS[step_h]
     print(f"=== {args.observations.name}: {len(st)} gauges x {len(times)} reports "
           f"{step_h} h apart")
+    if obs["quality_dropped"]:
+        print(f"  blanked {obs['quality_dropped']:,} value(s) Frost codes worse than "
+              f"{args.max_quality}, before any test")
 
     present = np.isfinite(v)
     n = present.sum(axis=1)

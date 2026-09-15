@@ -223,6 +223,8 @@ def main() -> int:
     ap.add_argument("--max-dist-km", type=float, default=5.0)
     ap.add_argument("--tail-mm", type=float, default=20.0,
                     help="a valid time counts as tail if any gauge passed this")
+    ap.add_argument("--max-quality", type=int, default=4,
+                    help="blank values Frost codes worse than this (default 4)")
     ap.add_argument("--no-screen", action="store_true",
                     help="keep gauges flagged by check_gauges.py")
     ap.add_argument("-o", "--out", type=Path, default=None)
@@ -230,7 +232,8 @@ def main() -> int:
 
     import xarray as xr
 
-    obs = load_observations(args.observations / f"{args.element}.npz")
+    obs = load_observations(args.observations / f"{args.element}.npz",
+                            max_quality=args.max_quality)
     var, convert = VARIABLES[args.element]
     label = args.label or args.forecasts[0].parent.name
     print(f"=== {label}: {len(args.forecasts)} forecast file(s), {args.element}\n")
@@ -239,6 +242,9 @@ def main() -> int:
     # arm is scored on the same stations by the same alignment. Read by default
     # rather than on request: a screen one arm forgot would be a difference
     # between arms that has nothing to do with the arms.
+    if obs["quality_dropped"]:
+        print(f"  blanked {obs['quality_dropped']:,} value(s) Frost codes worse "
+              f"than {args.max_quality}\n")
     screen = args.observations / f"{args.element}_check.json"
     screened_out: list[str] = []
     if screen.exists() and not args.no_screen:
@@ -331,6 +337,8 @@ def main() -> int:
         "accumulation": convention,
         "tail_mm": args.tail_mm,
         "screened_out": screened_out,
+        "max_quality": args.max_quality,
+        "quality_dropped": obs["quality_dropped"],
         "files": [str(p) for p in args.forecasts],
         "all": score(fc, ob),
         "tail": score(fc[tail_pairs], ob[tail_pairs]),

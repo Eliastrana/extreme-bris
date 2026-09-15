@@ -72,14 +72,29 @@ def nearest(slat, slon, glat, glon, block: int = 16):
     return idx, dist
 
 
-def load_observations(path: Path):
-    """Station ids, coordinates, hourly values and their times."""
+def load_observations(path: Path, max_quality: int | None = None):
+    """Station ids, coordinates, values and their times.
+
+    With max_quality, values Frost itself codes worse than that are blanked.
+    Frost's own words: 5 is "very uncertain, value is not corrected", 6 is
+    model data, 7 is "erroneous, value is not corrected". In the daily record
+    the thirteen code 7 values averaged 39 mm against 3 mm for code 0, and ten
+    of them followed a missing day: several days' rain booked on one. Files
+    fetched before codes were kept have none, and come back unchanged.
+    """
     with np.load(path, allow_pickle=False) as f:
+        values = f["values"]
+        dropped = 0
+        if max_quality is not None and "quality" in f.files:
+            bad = (f["quality"] > max_quality) & np.isfinite(values)
+            dropped = int(bad.sum())
+            values = np.where(bad, np.nan, values).astype(values.dtype)
         return {
             "stations": f["stations"],
             "lat": f["lat"].astype("float64"),
             "lon": f["lon"].astype("float64"),
-            "values": f["values"],
+            "values": values,
+            "quality_dropped": dropped,
             "times": np.array([np.datetime64(t.replace("Z", ""))
                                for t in f["times"]], dtype="datetime64[s]"),
             "element": str(f["element"]),
