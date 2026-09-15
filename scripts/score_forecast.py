@@ -71,6 +71,15 @@ VARIABLES = {
 }
 
 
+# Values no gauge in Norway can have, blanked before scoring. The national
+# records are 35.6 and -51.4 degC. The hourly cache holds 100 and -80 degC and a
+# wind of 81.5 m/s, codes 0 all, which are sentinels rather than weather.
+PLAUSIBLE = {
+    "temperature": (-55.0, 40.0),
+    "wind": (0.0, 75.0),
+}
+
+
 def deaccumulate(series: np.ndarray) -> tuple[np.ndarray, str]:
     """Per-step amounts, whichever convention the file uses.
 
@@ -242,6 +251,13 @@ def main() -> int:
     # arm is scored on the same stations by the same alignment. Read by default
     # rather than on request: a screen one arm forgot would be a difference
     # between arms that has nothing to do with the arms.
+    implausible = 0
+    if args.element in PLAUSIBLE:
+        lo, hi = PLAUSIBLE[args.element]
+        bad = np.isfinite(obs["values"]) & ((obs["values"] < lo) | (obs["values"] > hi))
+        implausible = int(bad.sum())
+        obs["values"] = np.where(bad, np.nan, obs["values"]).astype("float32")
+        print(f"  blanked {implausible:,} value(s) outside {lo:g} .. {hi:g} {obs['unit']}\n")
     if obs["quality_dropped"]:
         print(f"  blanked {obs['quality_dropped']:,} value(s) Frost codes worse "
               f"than {args.max_quality}\n")
@@ -340,6 +356,7 @@ def main() -> int:
         "screened_out": screened_out,
         "max_quality": args.max_quality,
         "quality_dropped": obs["quality_dropped"],
+        "implausible_dropped": implausible,
         "files": [str(p) for p in args.forecasts],
         "all": score(fc, ob),
         "tail": score(fc[tail_pairs], ob[tail_pairs]),
