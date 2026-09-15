@@ -24,6 +24,15 @@ WHY IT IS SMALL. Only the gauge sites are wanted, so this reads a box around
 the stations rather than the whole domain, and only the lead times asked for.
 That turns tens of gigabytes into single figures.
 
+LEADS ARE PICKED BY TIME, NOT BY POSITION. The archive steps hourly, 67 steps
+per cycle, while the arms step six-hourly. An earlier version took the first
+eleven steps as if they were six hours apart, so what it stored as leads 0 to
+60 hours were really hours 0 to 10: temperature scored three times worse than
+MEPS does, following the night-to-morning warming, and precipitation came out
+as one-hour amounts set against six-hour gauge sums. Nothing failed, the
+numbers were just wrong. So each lead is found in the file's own time axis, and
+a lead that is not there is an error rather than a neighbour.
+
 ACCUMULATION. MEPS precipitation accumulates from the start of the run, which
 is why the dataset recipe reads step 6 of the previous cycle rather than step 0
 of its own. Here the whole run is in hand, so consecutive steps are differenced
@@ -115,6 +124,25 @@ def open_cycle(when: dt.datetime):
     )
 
 
+def lead_steps(ds, when: dt.datetime, leads: list[int]) -> slice:
+    """The file's time steps holding exactly these leads, as a strided slice.
+
+    A slice rather than a list of indices because OPeNDAP can stride on the
+    server, so only the wanted steps cross the network.
+    """
+    times = np.asarray(ds["time"].values).astype("datetime64[h]")
+    want = np.datetime64(when, "h") + np.array(leads, dtype="timedelta64[h]")
+    pos = np.clip(np.searchsorted(times, want), 0, len(times) - 1)
+    if not np.array_equal(times[pos], want):
+        raise ValueError(f"leads to {leads[-1]}h not all in the file, which runs "
+                         f"{times[0]} .. {times[-1]}")
+    stride = int(pos[1] - pos[0]) if len(pos) > 1 else 1
+    steps = slice(int(pos[0]), int(pos[-1]) + 1, stride)
+    if not np.array_equal(np.arange(len(times))[steps], pos):
+        raise ValueError("leads are not evenly spaced in the file's time axis")
+    return steps
+
+
 def station_cells(obs, when: dt.datetime):
     """Row and column of each gauge, from the forecast file's own coordinates.
 
@@ -192,21 +220,22 @@ def main() -> int:
         missing = 0
 
         for ci, when in enumerate(cycles):
-            part = cache / f"{name}-{when:%Y%m%dT%H}.npy"
+            # Tagged by lead spacing: the untagged files from the version that
+            # read hourly steps as six-hourly must never be picked up again.
+            part = cache / f"{name}-{when:%Y%m%dT%H}-every{args.step}h.npy"
             if part.exists():
                 grid[:, ci, :] = np.load(part)
             else:
                 try:
                     with open_cycle(when) as ds:
+                        steps = lead_steps(ds, when, leads)
                         stack = []
                         for var in variables:
                             da = ds[var].isel(
-                                y=slice(r0, r1), x=slice(c0, c1))
+                                time=steps, y=slice(r0, r1), x=slice(c0, c1))
                             # Some fields carry a singleton height dimension.
                             da = da.squeeze(drop=True)
                             values = np.asarray(da.values, dtype="float64")
-                            want = [h // args.step for h in leads]
-                            values = values[want]
                             stack.append(values[:, rr, cc])
                         if len(stack) == 2:      # wind components
                             block = np.hypot(stack[0], stack[1])
