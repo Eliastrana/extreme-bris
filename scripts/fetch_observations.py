@@ -64,8 +64,31 @@ from check_smoothing import BATCH, norwegian_stations    # noqa: E402
 # The forecast-side name, the Frost element id, and the unit it arrives in.
 ELEMENTS = {
     "precipitation": ("sum(precipitation_amount PT1H)", "mm"),
+    "precipitation_daily": ("sum(precipitation_amount P1D)", "mm"),
     "temperature": ("air_temperature", "degC"),
     "wind": ("wind_speed", "m/s"),
+}
+
+# How each element is asked for. Hourly values are stamped by Frost at the end
+# of their hour, and stored that way.
+#
+# Daily precipitation comes as two series per gauge, 06-06 and 18-18 UTC. The
+# 06-06 one is the climate standard, and it is the one kept. Frost stamps it at
+# midnight of the day its window ENDS, with the six hours as an offset: checked
+# against Blindern's hourly sums, the value dated 2 September 2025 is 06 UTC on
+# the 1st to 06 UTC on the 2nd. It is stored stamped at 06 UTC, the end of its
+# window, the same convention as the hourly values, so a scorer never has to
+# know which kind of file it was handed to line the two up.
+#
+# WHY DAILY AT ALL. The hourly automatic gauges carry faults Frost marks as good:
+# stations stuck at 117 mm for days, and single 40 to 100 mm winter hours with
+# every gauge within 40 km dry. Screening those by hand would also screen out
+# the real local downpours this project is about. A 24 hour total from the
+# climate network is far less exposed to one bad hour, and daily is how the
+# extremes here were defined in the first place.
+HOURLY = {"timeresolutions": "PT1H", "offset": None, "shift_hours": 0}
+REQUESTS = {
+    "precipitation_daily": {"timeresolutions": "P1D", "offset": "PT6H", "shift_hours": 6},
 }
 
 # The window nothing has seen: after the checkpoint's validation period and
@@ -82,8 +105,8 @@ def chunks(start: dt.datetime, end: dt.datetime, days: int):
         t = nxt
 
 
-def fetch_part(ids, element, t0, t1, cid) -> list[tuple[str, str, float]]:
-    """One request: (station, iso hour, value) for whatever came back."""
+def fetch_part(ids, element, t0, t1, cid, request=HOURLY) -> list[tuple]:
+    """One request: (station, iso hour, value, quality code) for whatever came back."""
     ref = f"{t0:%Y-%m-%dT%H:%M:%S}Z/{t1:%Y-%m-%dT%H:%M:%S}Z"
     data = frost_get("observations/v0.jsonld",
                      {"sources": ",".join(ids), "referencetime": ref,
@@ -93,13 +116,15 @@ def fetch_part(ids, element, t0, t1, cid) -> list[tuple[str, str, float]]:
                       # ten minutes, which is six times the data for no gain:
                       # the model steps six-hourly. Precipitation is already
                       # hourly by virtue of the element name.
-                      "timeresolutions": "PT1H"}, cid).get("data", [])
+                      "timeresolutions": request["timeresolutions"]}, cid).get("data", [])
     out = []
     for rec in data:
         sid = rec.get("sourceId", "").split(":")[0]
         when = rec.get("referenceTime", "")
         for ob in rec.get("observations", []):
             if ob.get("elementId") != element:
+                continue
+            if request["offset"] and ob.get("timeOffset") != request["offset"]:
                 continue
             level = ob.get("level") or {}
             # Frost returns the same element at several heights for some
@@ -108,8 +133,14 @@ def fetch_part(ids, element, t0, t1, cid) -> list[tuple[str, str, float]]:
                 continue
             if element == "wind_speed" and level and level.get("value") not in (10, None):
                 continue
+            if request["shift_hours"]:
+                stamp = (dt.datetime.strptime(when[:19], "%Y-%m-%dT%H:%M:%S")
+                         + dt.timedelta(hours=request["shift_hours"]))
+                when = stamp.strftime("%Y-%m-%dT%H:%M:%S.000Z")
             try:
-                out.append((sid, when, float(ob["value"])))
+                # The quality code is kept, though Frost gave the stuck gauges
+                # code 0, so it is a record rather than a filter.
+                out.append((sid, when, float(ob["value"]), ob.get("qualityCode")))
             except (TypeError, ValueError):
                 pass
             break
@@ -167,7 +198,8 @@ def main() -> int:
                 if part.exists():
                     rows += [tuple(r) for r in json.loads(part.read_text())]
                 else:
-                    got = fetch_part(batch, element, t0, t1, cid)
+                    got = fetch_part(batch, element, t0, t1, cid,
+                                     REQUESTS.get(name, HOURLY))
                     part.write_text(json.dumps(got))
                     rows += got
                 done += 1
@@ -206,14 +238,23 @@ def main() -> int:
         si = {s: i for i, s in enumerate(seen_ids)}
         ti = {t: i for i, t in enumerate(times)}
         grid = np.full((len(seen_ids), len(times)), np.nan, dtype="float32")
-        for sid, when, value in rows:
+        # -1 where no code was recorded, which is every value cached before
+        # codes were kept.
+        quality = np.full(grid.shape, -1, dtype="int16")
+        for sid, when, value, *code in rows:
             grid[si[sid], ti[when]] = value
+            if code and code[0] is not None:
+                quality[si[sid], ti[when]] = code[0]
+        codes, counts = np.unique(quality[np.isfinite(grid)], return_counts=True)
+        print(f"  {name}: quality codes " + ", ".join(
+            f"{c}: {n:,}" for c, n in zip(codes, counts)))
 
         meta = {s["id"]: s for s in stations}
         out = args.out / f"{name}.npz"
         np.savez_compressed(
             out,
             values=grid,
+            quality=quality,
             stations=np.array(seen_ids),
             times=np.array(times),
             lat=np.array([meta[s]["lat"] for s in seen_ids], dtype="float64"),

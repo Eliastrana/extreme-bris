@@ -64,6 +64,8 @@ THRESHOLDS = (0.5, 5.0, 10.0, 20.0, 50.0)
 # Forecast variable per element, and what turns it into the gauge's unit.
 VARIABLES = {
     "precipitation": ("precipitation_amount", lambda a: a),
+    # Scored against the 06-06 UTC daily gauge totals instead of hourly sums.
+    "precipitation_daily": ("precipitation_amount", lambda a: a),
     "temperature": ("air_temperature_2m", lambda a: a - 273.15),
     "wind": ("wind_speed_10m", lambda a: a),
 }
@@ -83,6 +85,32 @@ def deaccumulate(series: np.ndarray) -> tuple[np.ndarray, str]:
         out = np.diff(series, axis=1, prepend=np.zeros((series.shape[0], 1)))
         return np.maximum(out, 0.0), "cumulative"
     return series, "per step"
+
+
+def daily_windows(series, times, step_h, obs, keep):
+    """24 hour forecast sums set against the gauge's own 06-06 UTC day.
+
+    A per-step amount at index k covers the step ending at times[k], so the day
+    ending at times[k] is steps k-n+1 .. k, n being steps per day. No window may
+    reach step zero, which is the initial state rather than a forecast. The
+    gauge value is stamped at the end of its day; a day the gauge did not report
+    is missing, not dry.
+    """
+    n = 24 // step_h
+    where = {t: i for i, t in enumerate(obs["times"])}
+    fc, ob, lead, ends = [], [], [], []
+    for k in range(n, len(times)):
+        i = where.get(times[k])
+        if i is None:
+            continue
+        fc.append(series[:, k - n + 1:k + 1].sum(axis=1))
+        ob.append(obs["values"][keep, i].astype("float64"))
+        lead.append((times[k] - times[0]) / np.timedelta64(1, "h"))
+        ends.append(times[k])
+    if not fc:
+        return None
+    fc, ob = np.stack(fc, axis=1), np.stack(ob, axis=1)
+    return fc, ob, np.tile(np.array(lead), (fc.shape[0], 1)), np.array(ends)
 
 
 def contingency(fc, ob, threshold):
@@ -217,13 +245,21 @@ def main() -> int:
             continue
 
         for series, times, step_h, keep, note in blocks:
-            if args.element == "precipitation" and note is None:
+            if args.element.startswith("precipitation") and note is None:
                 # A gridded file may hold amounts per step or since the run
                 # began. A point file says which it holds and has already been
                 # differenced, so leave it alone.
                 series, convention = deaccumulate(series)
             elif note:
                 convention = note
+            if args.element == "precipitation_daily":
+                days = daily_windows(series, times, step_h, obs, keep)
+                if days is not None:
+                    fc_all.append(days[0])
+                    ob_all.append(days[1])
+                    lead_all.append(days[2])
+                    all_times.append(days[3])
+                continue
             truth = accumulate(obs["values"][keep], obs["times"], times,
                                step_h if args.element == "precipitation" else 1)
 

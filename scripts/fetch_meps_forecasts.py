@@ -85,6 +85,9 @@ ARCHIVE = ("https://thredds.met.no/thredds/dodsC/meps25epsarchive/"
 # forecast element -> (variable in the file, how to turn it into the gauge unit)
 ELEMENTS = {
     "precipitation": (("precipitation_amount_acc",), lambda a: a),
+    # The same field, fetched at the daily climate gauges rather than the
+    # hourly ones: the stations come from the observation file of this name.
+    "precipitation_daily": (("precipitation_amount_acc",), lambda a: a),
     "temperature": (("air_temperature_2m",), lambda a: a - 273.15),
     "wind": (("x_wind_10m", "y_wind_10m"), lambda a: a),
 }
@@ -241,7 +244,7 @@ def main() -> int:
                             block = np.hypot(stack[0], stack[1])
                         else:
                             block = stack[0]
-                        if name == "precipitation":
+                        if name.startswith("precipitation"):
                             # Accumulated from the start of the run.
                             block = np.diff(block, axis=0,
                                             prepend=np.zeros((1, block.shape[1])))
@@ -270,7 +273,7 @@ def main() -> int:
             distance_km=dist,
             cycles=np.array([f"{c:%Y-%m-%dT%H:%M:%S}" for c in cycles]),
             leads=np.array(leads), element=name,
-            accumulation="differenced from run start" if name == "precipitation"
+            accumulation="differenced from run start" if name.startswith("precipitation")
             else "instantaneous",
         )
         filled = float(np.isfinite(grid).mean())
