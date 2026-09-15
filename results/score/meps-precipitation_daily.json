@@ -1,0 +1,118 @@
+{
+ "label": "meps",
+ "element": "precipitation_daily",
+ "accumulation": "differenced from run start",
+ "tail_mm": 20.0,
+ "screened_out": [
+  "SN50102"
+ ],
+ "max_quality": 4,
+ "quality_dropped": 699,
+ "files": [
+  "/home/eliastra/bris-runs/meps/precipitation_daily.npz"
+ ],
+ "all": {
+  "pairs": 521384,
+  "observed_mean": 3.2874236648744306,
+  "forecast_mean": 3.6438639033847293,
+  "bias": 0.3564402385102987,
+  "mae": 2.054763614881146,
+  "rmse": 4.4677671006795,
+  "observed_p99": 33.599998474121094,
+  "forecast_p99": 32.826752929687444
+ },
+ "tail": {
+  "pairs": 18554,
+  "observed_mean": 30.750037725493222,
+  "forecast_mean": 24.530008546106128,
+  "bias": -6.220029179387094,
+  "mae": 11.156094855682415,
+  "rmse": 14.431138928655589,
+  "observed_p99": 72.69999694824219,
+  "forecast_p99": 74.65507812500005
+ },
+ "ordinary": {
+  "pairs": 502830,
+  "observed_mean": 2.2740765271127197,
+  "forecast_mean": 2.873182902447926,
+  "bias": 0.5991063753352062,
+  "mae": 1.7189322208874964,
+  "rmse": 3.6073466448910536,
+  "observed_p99": 17.600000381469727,
+  "forecast_p99": 23.18359375
+ },
+ "thresholds": {
+  "0.5": {
+   "observed": 236493,
+   "forecast": 263998,
+   "hits": 210243,
+   "misses": 26250,
+   "false_alarms": 53755,
+   "correct_negatives": 231136,
+   "hit_rate": 0.8890030571729396,
+   "false_alarm_ratio": 0.20361896681035463
+  },
+  "5.0": {
+   "observed": 104328,
+   "forecast": 118077,
+   "hits": 81111,
+   "misses": 23217,
+   "false_alarms": 36966,
+   "correct_negatives": 380090,
+   "hit_rate": 0.7774614676788589,
+   "false_alarm_ratio": 0.31306689702482277
+  },
+  "10.0": {
+   "observed": 54202,
+   "forecast": 59546,
+   "hits": 37226,
+   "misses": 16976,
+   "false_alarms": 22320,
+   "correct_negatives": 444862,
+   "hit_rate": 0.6868012250470462,
+   "false_alarm_ratio": 0.3748362610418836
+  },
+  "20.0": {
+   "observed": 18554,
+   "forecast": 19126,
+   "hits": 10729,
+   "misses": 7825,
+   "false_alarms": 8397,
+   "correct_negatives": 494433,
+   "hit_rate": 0.5782580575617118,
+   "false_alarm_ratio": 0.43903586740562583
+  },
+  "50.0": {
+   "observed": 1220,
+   "forecast": 1154,
+   "hits": 449,
+   "misses": 771,
+   "false_alarms": 705,
+   "correct_negatives": 519459,
+   "hit_rate": 0.3680327868852459,
+   "false_alarm_ratio": 0.6109185441941074
+  }
+ },
+ "by_lead_hours": {
+  "30": {
+   "pairs": 261025,
+   "observed_mean": 3.2844792646021235,
+   "forecast_mean": 3.659453790944354,
+   "bias": 0.3749745263422304,
+   "mae": 1.9051275394598468,
+   "rmse": 4.164787378604281,
+   "observed_p99": 33.5,
+   "forecast_p99": 32.543515625000055
+  },
+  "54": {
+   "pairs": 260359,
+   "observed_mean": 3.290375596941611,
+   "forecast_mean": 3.6282341367922513,
+   "bias": 0.33785853985064046,
+   "mae": 2.204782460347769,
+   "rmse": 4.752170268462107,
+   "observed_p99": 33.599998474121094,
+   "forecast_p99": 33.12992187499981
+  }
+ }
+}

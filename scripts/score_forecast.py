@@ -310,7 +310,8 @@ def main() -> int:
     # comparison would ask each arm about a different set of days.
     tail_pairs = ob >= args.tail_mm
     n_truth = int(np.isfinite(ob).sum())
-    print(f"\n  {n_truth:,} station-hours with truth, "
+    unit = "station-days" if args.element == "precipitation_daily" else "station-hours"
+    print(f"\n  {n_truth:,} {unit} with truth, "
           f"{int(tail_pairs.sum()):,} of them at or above {args.tail_mm:g}")
 
     if n_truth == 0:
