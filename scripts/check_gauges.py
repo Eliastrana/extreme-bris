@@ -16,8 +16,11 @@ to look at, because a genuine local downpour looks exactly like that too, and
 those are the events this project is trying to forecast.
 
 THE TESTS, per station:
-  - identical run: the same value of at least 1 mm several reports in a row.
-    Rain does not repeat to the tenth of a millimetre; a stuck sensor does.
+  - identical run: the same value several reports in a row, either at 5 mm or
+    more or for a long stretch at 1 mm or more. Steady drizzle does repeat
+    1.0 mm for a few hours at a tenth-of-a-millimetre resolution, so a short
+    run of small values proves nothing; 117 mm for days, or 1.8 mm for 68
+    hours straight, is a stuck sensor.
   - wet share: the fraction of reports above zero, against a limit set by the
     time resolution, since most days rain somewhere on the west coast but most
     hours do not.
@@ -42,16 +45,17 @@ import numpy as np  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from xbris.stations import great_circle_km, load_observations  # noqa: E402
 
-# Limits per report length in hours: (identical run, wet share, big value mm).
-LIMITS = {1: (4, 0.5, 40.0), 24: (3, 0.9, 50.0)}
+# Limits per report length in hours: (identical run at >= 5 mm, identical run at
+# >= 1 mm, wet share, big value mm).
+LIMITS = {1: (3, 12, 0.5, 40.0), 24: (3, 6, 0.9, 50.0)}
 YEARLY_MM = 7000.0
 NEIGHBOUR_KM = 40.0
 
 
-def longest_identical_run(x: np.ndarray) -> tuple[int, float]:
+def longest_identical_run(x: np.ndarray, floor: float) -> tuple[int, float]:
     best, value, run = 1, 0.0, 1
     for a, b in zip(x[:-1], x[1:]):
-        if np.isfinite(b) and b >= 1.0 and a == b:
+        if np.isfinite(b) and b >= floor and a == b:
             run += 1
             if run > best:
                 best, value = run, float(b)
@@ -73,7 +77,7 @@ def main() -> int:
     step_h = int(np.median(np.diff(times)) / np.timedelta64(1, "h"))
     if step_h not in LIMITS:
         raise SystemExit(f"reports are {step_h} h apart; limits exist for {sorted(LIMITS)}")
-    run_limit, wet_limit, big_mm = LIMITS[step_h]
+    big_run, long_run, wet_limit, big_mm = LIMITS[step_h]
     print(f"=== {args.observations.name}: {len(st)} gauges x {len(times)} reports "
           f"{step_h} h apart")
 
@@ -85,9 +89,11 @@ def main() -> int:
     flagged = {}
     for i, sid in enumerate(st):
         reasons = []
-        run, value = longest_identical_run(v[i])
-        if run >= run_limit:
-            reasons.append(f"{run} identical reports of {value:g} mm")
+        for floor, limit in ((5.0, big_run), (1.0, long_run)):
+            run, value = longest_identical_run(v[i], floor)
+            if run >= limit:
+                reasons.append(f"{run} identical reports of {value:g} mm")
+                break
         if n[i] >= 30 and wet[i] > wet_limit:
             reasons.append(f"wet in {wet[i]:.0%} of reports")
         if n[i] >= 30 and yearly[i] > YEARLY_MM:
@@ -136,7 +142,8 @@ def main() -> int:
 
     out = args.out or args.observations.with_name(args.observations.stem + "_check.json")
     out.write_text(json.dumps({"flagged": flagged, "lonely": lonely,
-                               "limits": {"identical_run": run_limit, "wet_share": wet_limit,
+                               "limits": {"identical_run_5mm": big_run, "identical_run_1mm": long_run,
+                                "wet_share": wet_limit,
                                           "big_mm": big_mm, "yearly_mm": YEARLY_MM}},
                               indent=1))
     print(f"\nwrote {out}")
