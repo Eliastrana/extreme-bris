@@ -53,9 +53,13 @@ def main() -> int:
                 y = np.asarray(b[name].isel(time=t).values, dtype="float64").ravel()
                 good = np.isfinite(x) & np.isfinite(y)
                 x, y = x[good], y[good]
+                lead = int((ta[t] - ta[0]) / np.timedelta64(1, "h"))
+                if x.size == 0:
+                    # Accumulated fields are empty at step zero by design.
+                    print(f"{name:28s} {lead:4d}h {'(no values in either run)':>40s}")
+                    continue
                 d = np.abs(x - y)
                 corr = np.corrcoef(x, y)[0, 1] if x.std() > 0 and y.std() > 0 else float("nan")
-                lead = int((ta[t] - ta[0]) / np.timedelta64(1, "h"))
                 print(f"{name:28s} {lead:4d}h {x.mean():10.3f} {y.mean():10.3f} {x.max():9.3f} "
                       f"{y.max():9.3f} {d.mean():11.4f} {d.max():10.3f} {corr:6.3f}")
     return 0
