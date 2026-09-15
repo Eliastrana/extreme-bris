@@ -2,8 +2,8 @@
 #SBATCH --job-name=bris-cpu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --partition=milanq
-#SBATCH --cpus-per-task=128
+#SBATCH --partition=fpgaq
+#SBATCH --cpus-per-task=96
 #SBATCH --time=12:00:00
 #SBATCH --output=logs/bris-cpu-%j.out
 #SBATCH --error=logs/bris-cpu-%j.err
@@ -28,6 +28,10 @@
 #
 # DO NOT POINT THIS AT A CHECKPOINT TRAINING IS STILL WRITING. inference-last.ckpt
 # is rewritten at every save; copy it somewhere fixed first, as above.
+#
+# WHERE. fpgaq: four x86 AMD EPYC nodes, 96 cores and 500 GB each, usually
+# idle. milanq's free cores sat behind a down node and GPU-partition overlap,
+# and a40q, armq and aarchq are ARM, which this x86 environment cannot run on.
 #
 # LEADTIMES counts the analysis step. 7 is +0 .. +36 h, the shortest run that
 # holds one whole 06-06 UTC day (+6 .. +30 h) for the daily gauges.
@@ -55,7 +59,7 @@ export CUDA_VISIBLE_DEVICES=""
 export SLURM_GPUS_PER_NODE=1
 export BRIS_GPUS_PER_MODEL=1
 export SLURM_NNODES="${SLURM_NNODES:-1}"
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-128}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-96}"
 
 export MLFLOW_TRACKING_URI="file://$OUTPUT_DIR/mlruns"
 export HF_HUB_OFFLINE=1
