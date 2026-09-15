@@ -141,10 +141,9 @@ def main() -> int:
         print("\n--- quality codes: " + ", ".join(f"{c}: {k:,}" for c, k in zip(codes, counts)))
 
     out = args.out or args.observations.with_name(args.observations.stem + "_check.json")
-    out.write_text(json.dumps({"flagged": flagged, "lonely": lonely,
-                               "limits": {"identical_run_5mm": big_run, "identical_run_1mm": long_run,
-                                "wet_share": wet_limit,
-                                          "big_mm": big_mm, "yearly_mm": YEARLY_MM}},
+    limits = {"identical_run_5mm": big_run, "identical_run_1mm": long_run,
+              "wet_share": wet_limit, "big_mm": big_mm, "yearly_mm": YEARLY_MM}
+    out.write_text(json.dumps({"flagged": flagged, "lonely": lonely, "limits": limits},
                               indent=1))
     print(f"\nwrote {out}")
     return 0
