@@ -89,7 +89,9 @@ def main() -> int:
     ap.add_argument("--config-name", default="finetune")
     ap.add_argument("--start", default="2025-04-01")
     ap.add_argument("--end", default="2025-07-31")
-    ap.add_argument("--every", type=int, default=20, help="score every n-th validation sample")
+    # 21, not 20: samples are six hours apart, so every 20th is always the same
+    # hour of day and the subset would see only noon. 21 walks through all four.
+    ap.add_argument("--every", type=int, default=21, help="score every n-th validation sample")
     ap.add_argument("--shard", default=None, help="k/n: every n-th state of the subset, from the k-th")
     ap.add_argument("--cpu", action="store_true")
     ap.add_argument("--plan-only", action="store_true")
@@ -159,6 +161,11 @@ def main() -> int:
     if args.plan_only:
         for s in plan:
             print(f"    start {dates[s]} -> target {dates[s + target_offset]}")
+        # Building the model is what loads the weights; a checkpoint in the
+        # wrong format should fail here, on the login node, not on a CPU node
+        # an hour into a queue.
+        n = sum(p.numel() for p in trainer.model.parameters())
+        print(f"  model built, weights loaded: {n / 1e6:.1f} M parameters")
         return 0
 
     import pytorch_lightning as pl
