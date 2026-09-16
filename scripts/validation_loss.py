@@ -164,8 +164,15 @@ def main() -> int:
         # Building the model is what loads the weights; a checkpoint in the
         # wrong format should fail here, on the login node, not on a CPU node
         # an hour into a queue.
-        n = sum(p.numel() for p in trainer.model.parameters())
-        print(f"  model built, weights loaded: {n / 1e6:.1f} M parameters")
+        import torch
+
+        params = list(trainer.model.parameters())
+        n = sum(p.numel() for p in params)
+        with torch.no_grad():
+            checksum = sum(float(p.double().abs().sum()) for p in params)
+        # Two checkpoints giving the same checksum means the override did not
+        # take and both runs would score the same weights.
+        print(f"  model built: {n / 1e6:.1f} M parameters, weight checksum {checksum:.6f}")
         return 0
 
     import pytorch_lightning as pl
