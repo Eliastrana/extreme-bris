@@ -48,6 +48,10 @@ TAG="${BRIS_TAG:-$(basename "$CKPT" .ckpt)}"
 DATE="${BRIS_DATE:-2025-10-04T00:00:00}"
 STAMP="$(echo "$DATE" | tr -d ':-' | cut -c1-11)"          # 20251004T00
 LEADTIMES="${BRIS_LEADTIMES:-7}"
+# Ensemble members. With one process and no GPU, bris runs them one after
+# another, so the wall time grows with this. bris fixes its seed at 1234, so
+# separate jobs would give identical members; several have to share one job.
+MEMBERS="${BRIS_MEMBERS:-1}"
 LAM="${BRIS_LAM_ZARR:-meps-2p5km-${STAMP}Z-6h-v1.zarr}"
 GLOBAL="${BRIS_GLOBAL_ZARR:-od-an-n320-${STAMP}Z-6h-v1.zarr}"
 CONFIG="${BRIS_CONFIG:-$REPO_DIR/bris/configs/config_inference_smoke.yaml}"
@@ -79,7 +83,7 @@ mkdir -p "$OUTPUT_DIR" logs
 echo "=== node       : $(hostname), ${OMP_NUM_THREADS} threads"
 echo "=== checkpoint : $CKPT"
 echo "=== sha256     : $(sha256sum "$CKPT" | cut -c1-16)"
-echo "=== date       : $DATE, leadtimes $LEADTIMES"
+echo "=== date       : $DATE, leadtimes $LEADTIMES, members $MEMBERS"
 echo "=== inputs     : $LAM + $GLOBAL"
 echo "=== output     : $OUTPUT_DIR"
 
@@ -94,10 +98,11 @@ RUN_CONFIG="$OUTPUT_DIR/config-${SLURM_JOB_ID:-manual}.yaml"
 sed -e "s|^run_name: .*|run_name: bris_${TAG}|" \
     -e "s|^    checkpoint_path: .*|    checkpoint_path: ${CKPT}|" \
     -e "s|^    leadtimes: .*|    leadtimes: ${LEADTIMES}|" \
+    -e "s|^  num_members: .*|  num_members: ${MEMBERS}|" \
     -e "s|^    dataset_lam: .*|    dataset_lam: ${LAM}|" \
     -e "s|^    dataset_global: .*|    dataset_global: ${GLOBAL}|" \
     "$CONFIG" > "$RUN_CONFIG"
-grep -n "^run_name:\|checkpoint_path:\|^    leadtimes:\|^    dataset_lam:\|^    dataset_global:" "$RUN_CONFIG"
+grep -n "^run_name:\|checkpoint_path:\|^    leadtimes:\|^  num_members:\|^    dataset_lam:\|^    dataset_global:" "$RUN_CONFIG"
 echo
 
 cd "$ENV_DIR"
