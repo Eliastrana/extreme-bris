@@ -52,6 +52,10 @@ OUTPUT_DIR="${BRIS_OUTPUT_DIR:-$HOME/bris-runs/evaluation/$TAG}"
 export BRIS_OUTPUT_DIR="$OUTPUT_DIR"
 
 export SLURM_NNODES="${SLURM_NNODES:-1}"
+# One card holds the whole model at inference. The config's default is 2,
+# inherited from the smoke config, and with a single GPU bris refuses: "Total
+# number of GPUs (1) must be divisible by the number of GPUs per model (2)".
+export BRIS_GPUS_PER_MODEL="${BRIS_GPUS_PER_MODEL:-1}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 export MLFLOW_TRACKING_URI="file://$OUTPUT_DIR/mlruns"
 export HF_HUB_OFFLINE=1
