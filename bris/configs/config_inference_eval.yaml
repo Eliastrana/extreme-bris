@@ -1,0 +1,156 @@
+# THE EVALUATION CONFIG. One forecast per day at 00 UTC over the test period,
+# for each of the three models. Differences from the smoke config:
+#
+#   leadtimes    2 -> 11    +0 to +60 h, which holds two whole 06-06 UTC gauge
+#                           days, at +30 h and +54 h, the same windows MEPS was
+#                           scored on.
+#   num_members  1 -> 4     rain on a single member is one draw; heavy-rain days
+#                           are rare enough that one draw says little.
+#   routing      the global output is gone. The scoring is against Norwegian
+#                gauges, and writing the globe as well would double the disk
+#                for fields nothing reads.
+#
+# checkpoint_path, run_name and the datasets are substituted per run by
+# bris/slurm/bris_forecast.sbatch.
+
+# Bris CRPS-FFT inference on eX3 — SMOKE TEST.
+#
+# Generated from config_inference_ex3.yaml with three values reduced, because
+# `bris` takes a plain --config file and has no flag for overriding them:
+#
+#   num_gpus_per_model  4 -> 1
+#   num_members         2 -> 1
+#   leadtimes          10 -> 2
+#
+# Everything else is identical. Use config_inference_ex3.yaml for real runs.
+#
+#
+# Derived from met-no/bris-forecaster configs/config_inference.yaml, with three
+# deliberate changes for this cluster:
+#
+#   1. Paths point at ${oc.env:BRIS_DATA_DIR} / ${oc.env:BRIS_MODEL_DIR} rather
+#      than MET's relative ./inputs and ./outputs, so the Slurm script controls
+#      placement without editing this file.
+#   2. A single initialisation date instead of MET's 2025-04-01..04-08 sweep.
+#      The first milestone is one forecast, not a week of them.
+#   3. dataset_global points at an ERA5 N320 build, NOT the MARS operational
+#      analysis MET used. See docs/INPUTS.md — the `od` dataset is class-od and
+#      not public, and our MARS application is still pending. Same grid and
+#      variables, different source. Expect some skill difference; the point of
+#      this run is that the model executes and the fields are physical.
+#
+# Everything else is left exactly as MET published it. In particular
+# num_gpus_per_model and num_members are unchanged, because they describe how
+# the checkpoint is sharded, not a free tuning knob.
+
+defaults:
+  - override hydra/job_logging: none
+  - override hydra/hydra_logging: none
+  - _self_
+
+run_name: bris_eval
+
+output_path: ${oc.env:BRIS_OUTPUT_DIR,./outputs}
+data_path: ${oc.env:BRIS_DATA_DIR,./inputs}
+model_path: ${oc.env:BRIS_MODEL_DIR,./models}
+
+# Overridden on the command line by the Slurm script.
+start_date: 2025-04-01T00:00:00
+end_date: 2025-04-01T00:00:00
+
+checkpoints:
+  forecaster:
+    checkpoint_path: ${model_path}/bris-forecaster/bris-crpsfft_inference.ckpt
+    # This controls the rollout, NOT the `-l` flag the job script passes: job
+    # 1377740 ran with `-l 10` and still produced two steps.
+    #
+    # It must be a literal integer. bris validates the config file against a
+    # JSON schema BEFORE OmegaConf resolves anything, so ${oc.env:...} here
+    # fails with "is not of type 'integer'" (job 1377742) — unlike the hardware
+    # block, which is read after resolution. The job script therefore writes a
+    # per-run copy with this line substituted.
+    #
+    # COUNTS THE ANALYSIS STEP. The schema says "This includes the analysis
+    # leadtime", so N gives +0h .. +(N-1)*6h. 11 is 60 hours, not 10.
+    leadtimes: 11                 # counts the analysis step: +0 .. +60 h
+    static_forcings_dataset: null
+    switch_graph: null
+
+# Chunking of the encoder and decoder attention blocks. bris reads this as
+# `inference_num_chunks` and sets ANEMOI_INFERENCE_NUM_CHUNKS; the default is 1,
+# which OOMs on a single 80 GB A100 — it asked for another 15.56 GiB with 8.93
+# free, inside the encoder mapper. Chunking trades speed for peak memory and
+# does not change the result. MET's training config uses 4.
+inference_num_chunks: 8
+
+timestep: 6h
+frequency: 6h
+workdir: ${output_path}
+
+dataset:
+  cutout:
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_lam}
+      reorder: sort
+      trim_edge: 50               # drops 50 cells ~= 125 km of MEPS relaxation zone
+    - dataset: ${hardware.paths.data}/${hardware.files.dataset_global}
+      select: ${selected_vars}
+      reorder: sort
+  min_distance_km: 0
+  adjust: all
+
+dataloader:
+  batch_size: 1
+  prefetch_factor: 2
+  num_workers: 1
+  pin_memory: True
+
+  read_group_size: 1              # upstream comment: do not change, not fully implemented
+
+  datamodule:
+    _target_: bris.data.dataset.NativeGridDataset
+    _convert_: all
+
+hardware:
+  paths:
+    data: ${data_path}
+  files:
+    # SUBSTITUTED: ERA5 N320 in place of MET's aifs-od-an-oper-...-n320 MARS build.
+    dataset_global: era5-n320-2025-6h-v1.zarr
+    dataset_lam: meps-2p5km-2025-6h-v1.zarr
+
+  num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE}}
+  # Sharded across two cards. One 40 GB A100 is not enough: with chunking
+  # active the failure moved to attention_block's output accumulator,
+  #   out = torch.zeros((*query.shape[:-1], self.out_channels_conv))
+  # which is full-size regardless of num_chunks — 5.19 GiB with 528 MiB free.
+  # More chunks cannot help that allocation; splitting the model can.
+  # Settable from the job script, so the same config serves 1, 2 or 4 cards
+  # without editing the file — the partitions differ in how many are free.
+  num_gpus_per_model: ${oc.decode:${oc.env:BRIS_GPUS_PER_MODEL,2}}
+  num_members: 4                  # four draws per forecast
+  num_nodes: ${oc.decode:${oc.env:SLURM_NNODES}}
+
+model:
+  _target_: bris.model.brispredictor.BrisPredictor
+  _convert_: all
+
+routing:
+  - decoder_index: 0
+    domain_index: 0
+    outputs:
+      - netcdf:
+          filename_pattern: ${output_path}/nordic_${run_name}_%Y-%m-%dT%HZ.nc
+          variables: [2t, msl, tp]
+          extra_variables: [ws]
+          domain_name: "meps"
+
+selected_vars: [
+  10u, 10v, 2d, 2t, cos_julian_day, cos_latitude, cos_local_time, cos_longitude, hcc,
+  insolation, lcc, lsm, mcc, msl, q_100, q_1000, q_150, q_200, q_250, q_300, q_400, q_50, q_500,
+  q_700, q_850, q_925, sin_julian_day, sin_latitude, sin_local_time, sin_longitude, skt, sp,
+  ssrd, strd, t_100, t_1000, t_150, t_200, t_250, t_300, t_400, t_50, t_500, t_700, t_850,
+  t_925, tcc, tcw, tp, u_100, u_1000, u_150, u_200, u_250, u_300, u_400, u_50, u_500, u_700,
+  u_850, u_925, v_100, v_1000, v_150, v_200, v_250, v_300, v_400, v_50, v_500, v_700, v_850,
+  v_925, w_100, w_1000, w_150, w_200, w_250, w_300, w_400, w_50, w_500, w_700, w_850, w_925, z,
+  z_100, z_1000, z_150, z_200, z_250, z_300, z_400, z_50, z_500, z_700, z_850, z_925
+]
