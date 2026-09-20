@@ -61,7 +61,10 @@ export MLFLOW_TRACKING_URI="file://$OUTPUT_DIR/mlruns"
 export HF_HUB_OFFLINE=1
 export HYDRA_FULL_ERROR=1
 # Read by anemoi at import time; see bris_smoke.sbatch.
-export ANEMOI_INFERENCE_NUM_CHUNKS="${BRIS_NUM_CHUNKS:-8}"
+export ANEMOI_INFERENCE_NUM_CHUNKS="${BRIS_NUM_CHUNKS:-16}"
+# The mappers are where the peak sits: this is what made training fit on one
+# card, and inference on a shared GPU needs it for the same reason.
+export ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER="${BRIS_NUM_CHUNKS_MAPPER:-32}"
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # shellcheck source=../../scripts/tls_env.sh
