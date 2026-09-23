@@ -169,11 +169,14 @@ class BrisReader:
                 member = "ensemble_member"
                 da = da.expand_dims({member: [0]}, axis=1)
 
-            selected = da.isel(
-                y=xr.DataArray(self._row, dims="station"),
-                x=xr.DataArray(self._col, dims="station"),
-            ).transpose("time", member, "station")
-            steps = np.asarray(selected.values, dtype="float64")
+            # Read the whole field once and pick the gauge cells in memory. The
+            # files are uncompressed, and netCDF4 serves a scattered-point
+            # selection by seeking through the file point by point: 8.8 s for
+            # 20 gauges, against 1.1 s for the whole field and all 715, with
+            # identical values. The scattered read put a full evaluation at
+            # about a day.
+            field = np.asarray(da.transpose("time", member, "y", "x").values)
+            steps = field[:, :, self._row, self._col].astype("float64")
             times = np.asarray(ds["time"].values).astype("datetime64[s]")
             attrs = {
                 key: str(value)
