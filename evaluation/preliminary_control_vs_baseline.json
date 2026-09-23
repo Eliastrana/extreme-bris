@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-09-23",
+  "title": "PRELIMINARY: untouched Bris vs control arm only (not the primary endpoint)",
+  "period": {
+    "start": "2025-08-01",
+    "end": "2026-09-06",
+    "cycle_hour_utc": 0,
+    "expected_cycles": 402
+  },
+  "required_models": [
+    "baseline",
+    "control"
+  ],
+  "benchmark": "meps",
+  "ensemble_members": 4,
+  "strict_common_cases": true,
+  "leads_hours": [
+    30,
+    54
+  ],
+  "thresholds_mm": [
+    20.0,
+    50.0
+  ],
+  "primary": {
+    "first": "control",
+    "second": "baseline",
+    "lead_hours": 30,
+    "metric": "twcrps",
+    "threshold_mm": 20.0,
+    "scope": "all strict-common station-days"
+  },
+  "comparisons": [
+    [
+      "control",
+      "baseline"
+    ]
+  ],
+  "secondary_metrics": [
+    "fair_crps",
+    "twcrps_20",
+    "twcrps_50",
+    "fair_brier_20",
+    "fair_brier_50",
+    "brier_20",
+    "brier_50",
+    "ensemble_mean_mae",
+    "reliability",
+    "hit_rate",
+    "false_alarm_ratio"
+  ],
+  "event_probability_cutoff": 0.5,
+  "bootstrap": {
+    "method": "paired fixed calendar blocks",
+    "block_days": 7,
+    "replicates": 5000,
+    "confidence": 0.95,
+    "seed": 20260922
+  },
+  "observations": {
+    "source": "Frost precipitation_daily",
+    "window": "06-06 UTC",
+    "max_quality": 4,
+    "max_distance_km": 5.0,
+    "apply_gauge_screen": true
+  },
+  "forecast_accumulation": "per_step",
+  "deterministic_comparison": {
+    "meps_against": [
+      "Bris ensemble mean",
+      "Bris individual members"
+    ],
+    "probabilistic_meps_comparison": false
+  },
+  "interpretation": {
+    "paired_difference": "first model minus second model",
+    "lower_is_better": true,
+    "primary_positive_result": "the upper 95% block-bootstrap bound is below zero",
+    "ordinary_weather_tradeoff": "report effect size and interval; no post-hoc tolerance"
+  },
+  "note": "A first look at the two models whose inference finished first, run while the tail arm was still forecasting. It does not replace or alter evaluation_plan.json: the primary endpoint (tail minus control) is scored only by the frozen plan once all three models exist. Nothing about the models or the frozen plan can change in response to this look."
+}
