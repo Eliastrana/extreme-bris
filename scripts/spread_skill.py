@@ -81,9 +81,12 @@ def main() -> int:
     root = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", action="append", required=True, metavar="LABEL=PATH_OR_GLOB")
-    ap.add_argument("--meps", type=Path, required=True)
+    ap.add_argument("--meps", type=Path, default=None,
+                    help="MEPS point forecasts; leave out where none exist, e.g. the validation period")
     ap.add_argument("--observations", type=Path, required=True)
     ap.add_argument("--plan", type=Path, default=root / "evaluation" / "evaluation_plan.json")
+    ap.add_argument("--pairs", default="tail-control",
+                    help="comma-separated first-second model pairs to compare, e.g. tail1000-control1000")
     ap.add_argument("--replicates", type=int, default=2000)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
@@ -99,16 +102,17 @@ def main() -> int:
     dist = float(op["max_distance_km"])
     indexes = {l: ev.index_model_files(specs[l]) for l in labels}
     readers = {l: ev.BrisReader(obs, dist, plan["forecast_accumulation"]) for l in labels}
-    meps = ev.MepsReader(args.meps.expanduser(), obs, dist)
+    meps = ev.MepsReader(args.meps.expanduser(), obs, dist) if args.meps else None
     period = plan["period"]
     cycles = ev.expected_cycles(period["start"], period["end"], int(period["cycle_hour_utc"]))
 
     got = {lead: {"obs": [], "dates": [], "models": {l: [] for l in labels}} for lead in leads}
     for n, cycle in enumerate(cycles, 1):
-        if not all(cycle in indexes[l] for l in labels) or not meps.has_cycle(cycle):
+        if not all(cycle in indexes[l] for l in labels) or (meps and not meps.has_cycle(cycle)):
             continue
         daily = {l: readers[l].read(indexes[l][cycle], leads)[0] for l in labels}
-        meps_daily = meps.read(cycle, leads)
+        # Without MEPS the common-case rule still needs a finite stand-in for it.
+        meps_daily = meps.read(cycle, leads) if meps else np.zeros((len(leads), len(obs["stations"])))
         for li, lead in enumerate(leads):
             valid = np.datetime64(cycle) + np.timedelta64(lead, "h")
             truth = ev.observation_for_time(obs, valid)
@@ -159,20 +163,23 @@ def main() -> int:
                 parts.append(f"[{b['lo']:g}-{upper}] {b['ratio']:.2f} (n={b['cases']})")
             print(f"    {l:9s} " + "  ".join(parts))
 
-        # tail - control ratio, seven-day calendar blocks
+        # paired ratio differences, seven-day calendar blocks
         day0 = dates.min()
         block = ((dates - day0).astype(int) // 7)
         blocks = np.unique(block)
         index = {b: np.flatnonzero(block == b) for b in blocks}
-        diffs = []
-        for _ in range(args.replicates):
-            pick = np.concatenate([index[b] for b in rng.choice(blocks, size=blocks.size, replace=True)])
-            diffs.append(stats(ens["tail"][pick], o[pick])["ratio"] - stats(ens["control"][pick], o[pick])["ratio"])
-        lo_ci, hi_ci = np.percentile(diffs, [2.5, 97.5])
-        d = out["models"]["tail"]["ratio"] - out["models"]["control"]["ratio"]
-        out["tail_minus_control_ratio"] = {"difference": d, "ci_lower": float(lo_ci), "ci_upper": float(hi_ci),
-                                           "blocks": int(blocks.size), "replicates": args.replicates}
-        print(f"  tail - control ratio: {d:+.3f}  (95% block bootstrap {lo_ci:+.3f} to {hi_ci:+.3f}, {blocks.size} blocks)")
+        out["ratio_differences"] = {}
+        for pair in args.pairs.split(","):
+            first, second = pair.split("-")
+            diffs = []
+            for _ in range(args.replicates):
+                pick = np.concatenate([index[b] for b in rng.choice(blocks, size=blocks.size, replace=True)])
+                diffs.append(stats(ens[first][pick], o[pick])["ratio"] - stats(ens[second][pick], o[pick])["ratio"])
+            lo_ci, hi_ci = np.percentile(diffs, [2.5, 97.5])
+            d = out["models"][first]["ratio"] - out["models"][second]["ratio"]
+            out["ratio_differences"][pair] = {"difference": d, "ci_lower": float(lo_ci), "ci_upper": float(hi_ci),
+                                              "blocks": int(blocks.size), "replicates": args.replicates}
+            print(f"  {first} - {second} ratio: {d:+.3f}  (95% block bootstrap {lo_ci:+.3f} to {hi_ci:+.3f}, {blocks.size} blocks)")
         report["leads"][str(lead)] = out
 
     args.out.expanduser().parent.mkdir(parents=True, exist_ok=True)

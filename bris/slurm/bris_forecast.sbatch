@@ -45,6 +45,8 @@ END="${BRIS_END:?set BRIS_END, e.g. 2026-09-06}"
 HOUR="${BRIS_HOUR:-00}"
 LEADTIMES="${BRIS_LEADTIMES:-11}"
 MEMBERS="${BRIS_MEMBERS:-4}"
+# Forecast every Nth day. 1 for the evaluation; more for a quick look.
+STEP_DAYS="${BRIS_STEP_DAYS:-1}"
 LAM="${BRIS_LAM_ZARR:?set BRIS_LAM_ZARR}"
 GLOBAL="${BRIS_GLOBAL_ZARR:?set BRIS_GLOBAL_ZARR}"
 CONFIG="${BRIS_CONFIG:-$REPO_DIR/bris/configs/config_inference_eval.yaml}"
@@ -77,7 +79,7 @@ echo "=== node       : $(hostname), $GPUS gpu(s)"
 echo "=== model      : $TAG"
 echo "=== checkpoint : $CKPT"
 echo "=== sha256     : $(sha256sum "$CKPT" | cut -c1-16)"
-echo "=== dates      : $START .. $END at ${HOUR}Z, leadtimes $LEADTIMES, members $MEMBERS"
+echo "=== dates      : $START .. $END at ${HOUR}Z, every $STEP_DAYS day(s), leadtimes $LEADTIMES, members $MEMBERS"
 echo "=== inputs     : $LAM + $GLOBAL"
 echo "=== output     : $OUTPUT_DIR"
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
@@ -125,7 +127,7 @@ while [[ "$day" < "$END" || "$day" == "$END" ]]; do
       echo "  $day  FAILED rc=$rc, log kept at $OUTPUT_DIR/log-${day}.txt" >&2
     fi
   fi
-  day="$(date -d "$day + 1 day" +%Y-%m-%d)"
+  day="$(date -d "$day + $STEP_DAYS day" +%Y-%m-%d)"
 done
 
 echo
