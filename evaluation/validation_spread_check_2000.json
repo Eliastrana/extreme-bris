@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-09-26",
+  "title": "EXPLORATORY: when does the tail arm's spread collapse appear? Steps 1000, 2000 and 3000, validation period only.",
+  "note": "Follows validation_spread_check.json, which found no collapse at step 1000 and a clear one at step 3000. Adds the step-2000 checkpoints to find the shortest run that shows it. Validation period only, never the test period. Not a test of the thesis question.",
+  "period": {"start": "2025-04-01", "end": "2025-07-31", "cycle_hour_utc": 0, "expected_cycles": 122},
+  "required_models": ["control1000", "tail1000", "control2000", "tail2000", "control3000", "tail3000"],
+  "ensemble_members": 4,
+  "strict_common_cases": true,
+  "leads_hours": [30],
+  "thresholds_mm": [20.0, 50.0],
+  "observations": {"source": "Frost precipitation_daily", "window": "06-06 UTC", "max_quality": 4, "max_distance_km": 5.0, "apply_gauge_screen": true},
+  "forecast_accumulation": "per_step"
+}
