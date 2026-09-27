@@ -1,0 +1,30 @@
+# TAIL VARIANT A: THE SAME TAIL TERM AT A TENTH OF THE DOSE.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_a
+#   scripts/diff_configs.py finetune_tail finetune_tail_a
+#
+# The tail arm's ensemble lost 14 percent of its spread between steps 1 000
+# and 2 000, and that cost it the primary endpoint. This asks whether the
+# collapse follows the dose. Threshold, scalers and everything else are the
+# tail arm's; only the weight changes, from 13 716 to a tenth of it. At the
+# measured term sizes (results/tail-weight/measure-cpu-merged.json) that
+# makes the tail term about 9 percent of the loss on an extreme state instead
+# of half, and about 2 percent over the whole window instead of 16.5.
+#
+# A SCREENING RUN, STOPPED AT STEP 2 000. The spread collapse was fully in
+# place by then, so 2 000 steps show it. The learning-rate schedule still runs
+# over 3 000 steps, so this run at step 2 000 has had exactly the learning rate
+# the control arm's step-2 000 checkpoint had, and the two compare directly.
+# Letting iterations follow max_steps would decay the rate a third faster and
+# give the comparison a second cause.
+
+defaults:
+- finetune_tail
+- _self_
+
+training:
+  max_steps: 2000
+  lr:
+    iterations: 3000
+  training_loss:
+    loss_weights: [1.0, 1371.6]
