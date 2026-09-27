@@ -1,0 +1,53 @@
+# TAIL VARIANT B: A MODERATE THRESHOLD, AT VARIANT A'S DOSE.
+#
+#   scripts/measure_tail_weight.py --config-name finetune_tail_b   # sets the weight below
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_b
+#   scripts/diff_configs.py finetune_tail_a finetune_tail_b
+#
+# Follows Wessel et al. (2026), who put the threshold at a moderately high
+# percentile rather than far out in the tail. 20 mm per 6 h, the tail arm's
+# threshold, is the 99.94th percentile of 6-hour precipitation on the Nordic
+# cutout in the training window: about one value in 1 700. 5 mm per 6 h is the
+# 97.3rd (scripts/precip_percentiles.py, every third day of the window, all
+# four states of each; ~/bris-runs/tail-variants/percentiles.json). By rarity
+# it also matches what the evaluation scores: 20 mm per day at the gauges is
+# their 96.4th percentile.
+#
+# THE SAME DOSE AS VARIANT A, SO THE TWO DIFFER ONLY IN THE THRESHOLD: the
+# weight is a tenth of the one that makes the two terms equal on the extreme
+# states, measured for this threshold, so the tail term is about 9 percent of
+# an extreme state's loss in both.
+#
+# The loss list is restated whole because Hydra replaces lists instead of
+# merging them. Only tail_threshold differs from finetune_tail.yaml; the
+# diff_configs.py line above checks that.
+#
+# Stopped at step 2 000 on the 3 000-step learning-rate schedule, as variant A.
+
+defaults:
+- finetune_tail
+- _self_
+
+training:
+  max_steps: 2000
+  lr:
+    iterations: 3000
+  training_loss:
+    losses:
+        - _target_: anemoi.training.losses.AlmostFairKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+        - _target_: xbris.losses.TailWeightedKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'lam_node_weights']
+          # 5 mm per 6 h in the units the loss sees: 0.005 m * 422.037, the
+          # normaliser in the warm-start checkpoint (scripts/tail_threshold.py --mm 5).
+          tail_threshold: 2.1101857
+          tail_variable: tp
+          tail_index: 38
+          tail_scale: 1.0
+    # NOT YET MEASURED. The tail weight is set from measure_tail_weight.py
+    # with this threshold, as a tenth of weight_equal_on_extremes. Until then
+    # the placeholder below makes the term negligible, and this config must
+    # not be trained.
+    loss_weights: [1.0, 1.0]
