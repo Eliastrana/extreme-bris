@@ -46,8 +46,16 @@ training:
           tail_variable: tp
           tail_index: 38
           tail_scale: 1.0
-    # NOT YET MEASURED. The tail weight is set from measure_tail_weight.py
-    # with this threshold, as a tenth of weight_equal_on_extremes. Until then
-    # the placeholder below makes the term negligible, and this config must
-    # not be trained.
-    loss_weights: [1.0, 1.0]
+    # MEASURED: scripts/measure_tail_weight.py --config-name finetune_tail_b,
+    # 2026-09-27, job 1419196, on the same 23 extreme and 23 ordinary states
+    # as the tail arm's measurement (~/bris-runs/tail-weight/measure-1419196.json).
+    # The weight that makes the two terms equal on extreme states is 839.8
+    # (median of per-state ratios 899.0); a tenth of it is below, the same
+    # dose as variant A. At this weight the tail term is 1/11 of an extreme
+    # state's loss, as in A, and about 2.0 percent over the whole window
+    # against A's 1.9.
+    #
+    # The difference from A that the threshold brings: at 5 mm the term
+    # fires on ordinary states too, 21 000 Nordic points over the threshold
+    # against 72 000 on extreme ones, where at 20 mm it barely fired at all.
+    loss_weights: [1.0, 83.98]
