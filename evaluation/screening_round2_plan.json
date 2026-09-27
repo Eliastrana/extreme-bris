@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-09-27",
+  "status": "FROZEN before either variant was trained. The SHA-256 of this file is recorded in the commit that froze it and in every screening report.",
+  "title": "Screening round 2: does any dose of the tail term help without collapsing the ensemble?",
+  "note": "Selection on the validation period only. A variant that passes is a candidate, not a result: the thesis claim needs a full-length run and a separate frozen test on data no choice here has seen, in practice the winter 2026-27 data.",
+
+  "period": {"start": "2025-04-01", "end": "2025-07-31", "cycle_hour_utc": 0, "every_nth_day": 2, "expected_cycles": 61},
+  "ensemble_members": 4,
+  "strict_common_cases": true,
+  "leads_hours": [30, 54],
+  "primary_lead_hours": 30,
+  "observations": {"source": "Frost precipitation_daily", "window": "06-06 UTC", "max_quality": 4, "max_distance_km": 5.0, "apply_gauge_screen": true},
+  "forecast_accumulation": "per_step",
+  "bootstrap": {"block_days": 7, "replicates": 2000},
+
+  "comparator": "control2000",
+  "candidates": {
+    "tailA2000": "finetune_tail_a at step 2000: tail arm threshold (20 mm per 6 h), weight 1 371.6, a tenth of the tail arm's",
+    "tailB2000": "finetune_tail_b at step 2000: threshold 5 mm per 6 h, the 97.3rd percentile of 6-hour Nordic precipitation in the training window (20 mm per 6 h is the 99.94th), weight a tenth of the measured equal-on-extremes weight, so the term is the same share of an extreme state's loss as in variant A"
+  },
+  "reference": {"tail2000": "the original tail arm at step 2000, the known failure, scored alongside so the gate is seen to catch it"},
+  "threshold_note": "By rarity, 5 mm per 6 h on the grid (97.3rd percentile) and 20 mm per day at the gauges (96.4th) are close, so variant B trains at the rarity the ranking metric scores; no separate matched-threshold metric is needed.",
+  "training_matched": "Every model at step 2000 of the same 3 000-step learning-rate schedule, same data, seed and ensemble size.",
+
+  "gate_spread": {
+    "measure": "spread-skill ratio difference, candidate minus control2000, lead 30 h",
+    "fails_if": "the point estimate is below -0.05 (half the collapse seen at step 2000) or the upper 95% bound is below 0",
+    "why": "The tail arm lost the primary endpoint through an overconfident ensemble. A variant that repeats it is out, whatever its scores."
+  },
+  "ranking_metric": {
+    "measure": "fair twCRPS at 20 mm per day, candidate minus control2000, lead 30 h",
+    "passes_if": "the point estimate is at or below 0",
+    "why": "Screening selects, it does not prove; 61 days cannot resolve the effect sizes of the main evaluation, so no interval is demanded here. The interval is reported."
+  },
+  "guard_ordinary_weather": {
+    "measure": "fair CRPS over all cases, candidate minus control2000, lead 30 h",
+    "fails_if": "the candidate is more than 1 percent worse"
+  },
+  "decision": {
+    "pass": "passes the spread gate, the ranking metric and the guard",
+    "winner": "the passing candidate with the lowest twCRPS at 20 mm; ties within 0.002 go to the lower weight",
+    "if_none_pass": "No full-length run. Report the dose-response (original, A, B) as the finding, and move to a spread-preserving change of the loss rather than more weights and thresholds."
+  },
+
+  "reported_not_decisive": [
+    "fair twCRPS at 50 mm per day",
+    "occurrence ratio O_t and share of exceedances no member reached, at 10, 20 and 50 mm (scripts/tail_calibration.py)",
+    "spread-skill ratio by forecast amount",
+    "everything at lead 54 h"
+  ]
+}
