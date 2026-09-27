@@ -2,7 +2,8 @@
   "schema_version": 1,
   "frozen_at": "2026-09-27",
   "amendments": [
-    {"date": "2026-09-27", "before_any_result": true, "previous_sha256": "e7f7e4a64bc7ff221a74e7d60b2bc223b592929f91dd35dbf4cb5f92b2bac2f1", "change": "Lead 54 h removed from leads_hours and from the reported list. The comparator and reference forecasts (control2000, tail2000) were made with 7 lead times and end at +36 h, so +54 h cannot be scored for them; found by testing the scorer on stand-in models before either variant was trained. Lead 54 h was reported only and decided nothing."}
+    {"date": "2026-09-27", "before_any_result": true, "previous_sha256": "e7f7e4a64bc7ff221a74e7d60b2bc223b592929f91dd35dbf4cb5f92b2bac2f1", "change": "Lead 54 h removed from leads_hours and from the reported list. The comparator and reference forecasts (control2000, tail2000) were made with 7 lead times and end at +36 h, so +54 h cannot be scored for them; found by testing the scorer on stand-in models before either variant was trained. Lead 54 h was reported only and decided nothing."},
+    {"date": "2026-09-27", "before_any_result": true, "previous_sha256": "65873a2de4b01a9725d5e3b410706b42c32f6a3bd48a60cd58a9fc6c6f36c0ca", "change": "Spread gate: the interval clause was 'upper 95% bound below 0', now 'below -0.025'. Tested on stand-ins before either variant was trained, the old clause failed control3000 against control2000, the same arm trained longer, for a narrowing of -0.018 whose interval was tight because the two checkpoints come from one run. A gate that rejects a negligible difference for being precise tests precision, not collapse. The point-estimate clause is unchanged."}
   ],
   "status": "FROZEN before either variant was trained. The SHA-256 of this file is recorded in the commit that froze it and in every screening report.",
   "title": "Screening round 2: does any dose of the tail term help without collapsing the ensemble?",
@@ -28,7 +29,7 @@
 
   "gate_spread": {
     "measure": "spread-skill ratio difference, candidate minus control2000, lead 30 h",
-    "fails_if": "the point estimate is below -0.05 (half the collapse seen at step 2000) or the upper 95% bound is below 0",
+    "fails_if": "the point estimate is below -0.05 (half the collapse seen at step 2000) or the upper 95% bound is below -0.025 (confidently at least a quarter of it)",
     "why": "The tail arm lost the primary endpoint through an overconfident ensemble. A variant that repeats it is out, whatever its scores."
   },
   "ranking_metric": {

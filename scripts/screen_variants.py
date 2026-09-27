@@ -13,7 +13,8 @@ WHAT IT DECIDES, and only as evaluation/screening_round2_plan.json says, at
 the plan's primary lead, every candidate against the comparator:
 
   gate    spread-skill ratio difference. Out if the point estimate is below
-          the plan's floor or the whole interval is below zero.
+          the plan's floor or the whole interval is below a quarter of the
+          known collapse.
   rank    fair twCRPS at 20 mm per day. Passes at or below zero.
   guard   fair CRPS over all cases. Out if more than the plan's tolerance worse.
 
@@ -58,6 +59,7 @@ from xbris.evaluation import (  # noqa: E402
 
 # The plan's rules, as numbers. Change the plan and these together, never one.
 GATE_FLOOR = -0.05
+GATE_UPPER = -0.025
 GUARD_TOLERANCE = 0.01
 RANK_THRESHOLD = 20.0
 TIE = 0.002
@@ -136,7 +138,7 @@ def decide(primary: dict, candidates: list[str], reference: list[str]) -> dict:
     for l in candidates + reference:
         v = primary["versus_comparator"][l]
         r = v["spread_skill_ratio"]
-        gate_ok = not (r["difference"] < GATE_FLOOR or r["ci_upper"] < 0.0)
+        gate_ok = not (r["difference"] < GATE_FLOOR or r["ci_upper"] < GATE_UPPER)
         rank_ok = v[f"twcrps_{RANK_THRESHOLD:g}"]["mean_difference"] <= 0.0
         guard_ok = v["fair_crps_relative"] <= GUARD_TOLERANCE
         verdicts[l] = {"gate_spread": gate_ok, "ranking_metric": rank_ok, "guard_ordinary_weather": guard_ok,
