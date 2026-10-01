@@ -66,7 +66,7 @@ TIE = 0.002
 REPORTED_TWCRPS = [50.0]
 CALIBRATION_THRESHOLDS = [10.0, 20.0, 50.0]
 # Lower weight wins a tie; the plan's candidates, lowest dose first.
-TIE_ORDER = ["tailB2000", "tailA2000"]
+TIE_ORDER = ["tailC2000", "tailB2000", "tailA2000"]
 
 
 def ratio_bootstrap(ens_a, ens_b, obs, dates, replicates: int, seed: int) -> dict:
