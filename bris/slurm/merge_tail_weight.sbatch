@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=tailw-merge
+#SBATCH --propagate=NONE
 #SBATCH --partition=defq
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=postprocess
+#SBATCH --propagate=NONE
 #SBATCH --partition=defq
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=finetune
+#SBATCH --propagate=NONE
 #SBATCH --partition=h200q
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

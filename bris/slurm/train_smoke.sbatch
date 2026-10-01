@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=train-smoke
+#SBATCH --propagate=NONE
 #SBATCH --partition=a100q
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

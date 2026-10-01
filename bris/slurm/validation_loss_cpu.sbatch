@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=val-loss
+#SBATCH --propagate=NONE
 #SBATCH --partition=fpgaq,defq
 #SBATCH --nodes=1
 #SBATCH --ntasks=1

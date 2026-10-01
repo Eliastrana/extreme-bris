@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=bris-inference
+#SBATCH --propagate=NONE
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --partition=hgx2q

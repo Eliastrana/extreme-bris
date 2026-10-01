@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=after-train
+#SBATCH --propagate=NONE
 #SBATCH --partition=defq
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -24,6 +25,15 @@
 #      made: every second day of April to July 2025, 7 lead times, 4 members
 #   3. if every arm in CHAIN/expected.txt has now submitted its forecasts,
 #      submit the screening, after all of them
+#
+# --propagate=NONE, here and in every script in bris/slurm. Since 2026-09-29
+# the login node caps address space at 16 GB (limits.conf, "* hard as"), and
+# Slurm copies the submitting shell's limits into the job. Loading Bris needs
+# far more address space than that, so every job submitted from the login
+# node after that date failed with "cannot allocate memory" on nodes with
+# terabytes free. The compute nodes' own limits are unlimited; NONE uses them.
+# A job submitted from inside a job inherits the cap too, which is why the
+# forecast and screening submissions below rely on it as well.
 #
 # The list of arms is a file, not an argument, so an arm added to the round
 # later (a plan amendment) is one line in that file, not resubmitted jobs.
@@ -81,7 +91,7 @@ done < "$CHAIN/expected.txt"
 for fixed in control2000 tail2000; do
     models="$models --model \"$fixed=$V/$fixed/nordic_*.nc\""
 done
-sj=$(sbatch --parsable --dependency=afterany$deps --partition=defq --cpus-per-task=8 --time=02:00:00 \
+sj=$(sbatch --parsable --propagate=NONE --dependency=afterany$deps --partition=defq --cpus-per-task=8 --time=02:00:00 \
     --job-name=screen-r2 --output="$HOME/bris-runs/tail-variants/screening.log" \
     --wrap "source scripts/env.sh; export OMP_NUM_THREADS=8 PYTHONUNBUFFERED=1; git pull -q; ~/bris-env/.venv/bin/python scripts/screen_variants.py $models --observations $HOME/bris-runs/observations-val --cache $HOME/bris-runs/tail-variants/screening-cases.npz --out $HOME/bris-runs/tail-variants/screening.json")
 echo "$sj" > "$CHAIN/screening-job"
