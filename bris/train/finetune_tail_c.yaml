@@ -1,0 +1,55 @@
+# TAIL VARIANT C: THE SAME TERM WITH NO THRESHOLD, AT VARIANT A'S DOSE.
+#
+#   sbatch bris/slurm/measure_tail_weight_cpu.sbatch k/n   (TAILW_CONFIG=finetune_tail_c TAILW_TAG=c)
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_c
+#   scripts/diff_configs.py finetune_tail_b finetune_tail_c
+#
+# The third point of a threshold series at a fixed dose: 20 mm per 6 h
+# (variant A), 5 mm (variant B), and here none at all. With no censoring the
+# term is ordinary almost-fair CRPS on Nordic precipitation, an extra weight on
+# one variable in one region and nothing more. That separates the two
+# candidate causes of the tail arm's spread collapse:
+#
+#   C keeps its spread, A and B lose it   the censoring is what collapses the
+#                                         ensemble: below the threshold the
+#                                         members all sit at exactly t, and
+#                                         the spread half of the score has
+#                                         almost nothing left to reward
+#   C loses it too                        extra weight on one variable is
+#                                         enough by itself
+#
+# NO THRESHOLD, WRITTEN AS A THRESHOLD FAR BELOW ZERO. The loss refuses to
+# build without one, on purpose. Normalised precipitation is x * 422.037 with
+# no offset, so every value the model or the data can produce lies far above
+# -1e6, max(z, -1e6) = z, and the term sees precipitation unchanged. Zero would
+# almost do, but it would clip whatever small negatives a prediction makes and
+# make this a threshold after all.
+#
+# Same dose as A and B: the weight is a tenth of the one that makes the two
+# terms equal on the extreme states, measured for this term. Stopped at step
+# 2 000 on the 3 000-step learning-rate schedule, as A and B.
+
+defaults:
+- finetune_tail
+- _self_
+
+training:
+  max_steps: 2000
+  lr:
+    iterations: 3000
+  training_loss:
+    losses:
+        - _target_: anemoi.training.losses.AlmostFairKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+        - _target_: xbris.losses.TailWeightedKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'lam_node_weights']
+          tail_threshold: -1.0e6
+          tail_variable: tp
+          tail_index: 38
+          tail_scale: 1.0
+    # NOT YET MEASURED. Set from measure_tail_weight.py with this config, as a
+    # tenth of weight_equal_on_extremes. Until then the placeholder below
+    # leaves the term negligible, and this config must not be trained.
+    loss_weights: [1.0, 1.0]

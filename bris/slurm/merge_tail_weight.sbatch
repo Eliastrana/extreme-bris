@@ -28,16 +28,18 @@ GPU_JOB="${2:-}"
 REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
 VENV="${BRIS_ENV_DIR:-$HOME/bris-env}/.venv"
 DIR="$HOME/bris-runs/tail-weight"
+# Same tag as the shards; empty for the tail arm, whose file names predate it.
+TAG="${TAILW_TAG:-}"
 
 files=()
 for k in $(seq 1 "$N"); do
-    f="$DIR/cpu-shard-$k-of-$N.json"
+    f="$DIR/cpu-shard-${TAG:+$TAG-}$k-of-$N.json"
     if [[ -f "$f" ]]; then files+=("$f"); else echo "MISSING $f"; fi
 done
 [[ ${#files[@]} -gt 0 ]] || { echo "no shard produced output"; exit 1; }
 
 "$VENV/bin/python" "$REPO_DIR/scripts/measure_tail_weight.py" \
-    --merge "${files[@]}" --out "$DIR/measure-cpu-merged.json"
+    --merge "${files[@]}" --out "$DIR/measure-cpu-merged${TAG:+-$TAG}.json"
 rc=$?
 
 if [[ -n "$GPU_JOB" ]]; then

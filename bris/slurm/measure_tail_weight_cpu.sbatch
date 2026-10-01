@@ -30,6 +30,10 @@
 set -uo pipefail
 
 SHARD="${1:?usage: sbatch $0 k/n}"
+# Which arm to measure, and a tag that keeps its files apart from the tail
+# arm's. Defaults reproduce the original measurement exactly.
+CONFIG_NAME="${TAILW_CONFIG:-finetune_tail}"
+TAG="${TAILW_TAG:-}"
 REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
 VENV="${BRIS_ENV_DIR:-$HOME/bris-env}/.venv"
 
@@ -41,11 +45,11 @@ export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-20260909}"
 export ANEMOI_INFERENCE_NUM_CHUNKS=16 ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER=32
 export XBRIS_SEQUENTIAL_MEMBERS=1
 
-OUT="$HOME/bris-runs/tail-weight/cpu-shard-${SHARD/\//-of-}.json"
+OUT="$HOME/bris-runs/tail-weight/cpu-shard-${TAG:+$TAG-}${SHARD/\//-of-}.json"
 echo "=== node  : $(hostname), $CORES cores, $(free -g | awk 'NR==2{print $7}') GB free"
-echo "=== shard : $SHARD -> $OUT"
+echo "=== shard : $SHARD of $CONFIG_NAME -> $OUT"
 
-"$VENV/bin/python" "$REPO_DIR/scripts/measure_tail_weight.py" --cpu --shard "$SHARD" --out "$OUT"
+"$VENV/bin/python" "$REPO_DIR/scripts/measure_tail_weight.py" --cpu --config-name "$CONFIG_NAME" --shard "$SHARD" --out "$OUT"
 rc=$?
 echo "=== finished rc=$rc"
 exit $rc
