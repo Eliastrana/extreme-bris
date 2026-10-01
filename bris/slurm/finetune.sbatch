@@ -88,6 +88,15 @@ if grep -qE '^\s*tail_threshold:\s*null\s*$' "$CONFIG"; then
     exit 1
 fi
 
+# The same for a tail weight that is still a placeholder. A config written
+# before its measurement says so in these words, and training it would spend a
+# day on a term that weighs nothing.
+if grep -q 'NOT YET MEASURED' "$CONFIG"; then
+    echo "ERROR: $CONFIG still has an unmeasured tail weight" >&2
+    echo "       measure it with scripts/measure_tail_weight.py --config-name $CONFIG_NAME first" >&2
+    exit 1
+fi
+
 echo "=== arm     : $CONFIG_NAME"
 [[ ${#EXTRA[@]} -gt 0 ]] && echo "=== override: ${EXTRA[*]}"
 echo "=== node    : $(hostname)"
