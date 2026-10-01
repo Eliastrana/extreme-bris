@@ -137,9 +137,21 @@ echo "=== chunks  : $ANEMOI_INFERENCE_NUM_CHUNKS outside training, mappers $ANEM
 # that is still true the two halves of the cutout differ by a factor of a
 # thousand at the seam. A run on that data trains and converges and answers a
 # question nobody asked.
-echo "=== checking precipitation units across the cutout"
+# The threshold each arm means, from a "# tail-mm:" line in its config: a
+# number of millimetres per 6 h, or "none" for an arm whose tail term has no
+# threshold. Absent means 20, the tail arm's, which is what this check always
+# assumed. An arm with no threshold still gets the units check, against the
+# control config, since its own threshold has no millimetre meaning to compare.
+TAIL_MM="$(grep -m1 -E '^# tail-mm:' "$CONFIG" | awk '{print $3}')"
+TAIL_MM="${TAIL_MM:-20}"
+UNITS_CONFIG="$CONFIG_NAME"
+if [[ "$TAIL_MM" == none ]]; then
+    UNITS_CONFIG=finetune
+    TAIL_MM=20
+fi
+echo "=== checking precipitation units across the cutout (threshold meant: ${TAIL_MM} mm, config $UNITS_CONFIG)"
 "$PY" "$REPO_DIR/scripts/tail_threshold.py" \
-      --config-dir "$CONFIG_DIR" --config-name "$CONFIG_NAME" --mm 20
+      --config-dir "$CONFIG_DIR" --config-name "$UNITS_CONFIG" --mm "$TAIL_MM"
 units_rc=$?
 if [[ $units_rc -ne 0 ]]; then
     echo "ERROR: precondition failed (rc=$units_rc). Not starting a two-day run." >&2

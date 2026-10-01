@@ -1,3 +1,4 @@
+# tail-mm: 20   (read by finetune.sbatch's threshold check)
 # TAIL VARIANT A: THE SAME TAIL TERM AT A TENTH OF THE DOSE.
 #
 #   sbatch bris/slurm/finetune.sbatch finetune_tail_a

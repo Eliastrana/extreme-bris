@@ -1,3 +1,4 @@
+# tail-mm: 5   (read by finetune.sbatch's threshold check)
 # TAIL VARIANT B: A MODERATE THRESHOLD, AT VARIANT A'S DOSE.
 #
 #   scripts/measure_tail_weight.py --config-name finetune_tail_b   # sets the weight below

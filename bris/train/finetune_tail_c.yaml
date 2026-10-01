@@ -1,3 +1,4 @@
+# tail-mm: none   (read by finetune.sbatch's threshold check)
 # TAIL VARIANT C: THE SAME TERM WITH NO THRESHOLD, AT VARIANT A'S DOSE.
 #
 #   sbatch bris/slurm/measure_tail_weight_cpu.sbatch k/n   (TAILW_CONFIG=finetune_tail_c TAILW_TAG=c)
@@ -49,7 +50,12 @@ training:
           tail_variable: tp
           tail_index: 38
           tail_scale: 1.0
-    # NOT YET MEASURED. Set from measure_tail_weight.py with this config, as a
-    # tenth of weight_equal_on_extremes. Until then the placeholder below
-    # leaves the term negligible, and this config must not be trained.
-    loss_weights: [1.0, 1.0]
+    # MEASURED: measure_tail_weight.py on CPU, TAILW_CONFIG=finetune_tail_c,
+    # 2026-10-01, jobs 1421726-1421732, the same 23 extreme and 23 ordinary
+    # states as A and B (~/bris-runs/tail-weight/measure-cpu-merged-c.json).
+    # Equal on extreme states at 390.9 (median of per-state ratios 385.1); a
+    # tenth of it below, the dose of A and B: the term is 1/11 of an extreme
+    # state's loss. Without a threshold it is just as large on ordinary states,
+    # so over the whole window it is about 5 percent of the loss, against
+    # about 2 for A and B. That is what removing the threshold means.
+    loss_weights: [1.0, 39.09]
