@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=after-train
+#SBATCH --partition=defq
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=2
+#SBATCH --time=00:30:00
+#SBATCH --output=logs/after-train-%j.out
+#SBATCH --error=logs/after-train-%j.err
+#
+# What happens after a screening run finishes, without anyone watching.
+#
+#   sbatch --dependency=afterok:TRAINJOB --export=ALL,ARM=tailA2000,TRAIN_JOB=TRAINJOB \
+#       bris/slurm/after_training.sbatch
+#
+# WHY. The H200s come free for a few days at a time between week-long
+# reservations and jobs. A finished run whose forecasts wait for someone to
+# notice can lose the card to the next job in the queue. So each training job
+# gets this as its follow-on:
+#
+#   1. find the run's step-2000 inference checkpoint, through the "Checkpoints
+#      path" its log printed, and copy it to ~/bris-models/<arm>/
+#   2. submit the validation forecasts from it, exactly as control2000's were
+#      made: every second day of April to July 2025, 7 lead times, 4 members
+#   3. if every arm in CHAIN/expected.txt has now submitted its forecasts,
+#      submit the screening, after all of them
+#
+# The list of arms is a file, not an argument, so an arm added to the round
+# later (a plan amendment) is one line in that file, not resubmitted jobs.
+
+set -uo pipefail
+
+ARM="${ARM:?set ARM, e.g. tailA2000}"
+TRAIN_JOB="${TRAIN_JOB:?set TRAIN_JOB, the training job id}"
+STEP="${STEP:-002000}"
+REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
+CHAIN="$HOME/bris-runs/tail-variants/chain"
+V="$HOME/bris-runs/validation-forecasts"
+export PATH=/cm/shared/apps/slurm/21.08.8/bin:$PATH
+cd "$REPO_DIR" || exit 1
+
+# DRY_RUN=1 prints every submission instead of making it, and keeps its own
+# chain directory and copies nothing, so the logic can be tested on an old run.
+if [[ "${DRY_RUN:-0}" == 1 ]]; then
+    CHAIN="${CHAIN_DIR:-$CHAIN-dry}"
+    sbatch() { echo "DRY sbatch $*" >&2; echo "$RANDOM"; }
+    cp() { echo "DRY cp $*" >&2; }
+fi
+mkdir -p "$CHAIN" logs
+
+log="logs/finetune-$TRAIN_JOB.out"
+run_dir="$(grep -m1 -o 'Checkpoints path: .*' "$log" 2>/dev/null | sed 's/Checkpoints path: //')"
+[[ -n "$run_dir" && -d "$run_dir" ]] || { echo "ERROR: no checkpoint path in $log" >&2; exit 1; }
+ckpt="$(ls "$run_dir"/inference-anemoi-by_step-epoch_*-step_${STEP}.ckpt 2>/dev/null | head -1)"
+[[ -n "$ckpt" ]] || { echo "ERROR: no step-$STEP inference checkpoint in $run_dir" >&2; exit 1; }
+
+dest="$HOME/bris-models/$ARM/$ARM-step${STEP}_inference.ckpt"
+mkdir -p "$(dirname "$dest")"
+cp -n "$ckpt" "$dest"
+echo "=== $ARM: $ckpt -> $dest"
+
+fc=$(sbatch --parsable --partition=h200q --gres=gpu:1 --time=04:00:00 \
+    --export=ALL,BRIS_TAG=$ARM,BRIS_CHECKPOINT=$dest,BRIS_OUTPUT_DIR=$V/$ARM,BRIS_START=2025-04-01,BRIS_END=2025-07-31,BRIS_STEP_DAYS=2,BRIS_LEADTIMES=7,BRIS_LAM_ZARR=meps-2p5km-year2-6h-v1.zarr,BRIS_GLOBAL_ZARR=od-an-n320-year2-6h-v1.zarr \
+    bris/slurm/bris_forecast.sbatch) || { echo "ERROR: forecast submission failed" >&2; exit 1; }
+echo "$fc" > "$CHAIN/$ARM.forecast-job"
+echo "=== $ARM: forecasts submitted as $fc"
+
+# The last arm to get here submits the screening. flock, so two arms that
+# finish together cannot both decide they were last, or both decide they were not.
+exec 9> "$CHAIN/.lock"
+flock 9
+[[ -f "$CHAIN/screening-job" ]] && { echo "=== screening already submitted"; exit 0; }
+deps=""
+models=""
+while read -r arm; do
+    [[ -z "$arm" ]] && continue
+    [[ -f "$CHAIN/$arm.forecast-job" ]] || { echo "=== waiting for $arm; not last"; exit 0; }
+    deps="$deps:$(cat "$CHAIN/$arm.forecast-job")"
+    models="$models --model \"$arm=$V/$arm/nordic_*.nc\""
+done < "$CHAIN/expected.txt"
+for fixed in control2000 tail2000; do
+    models="$models --model \"$fixed=$V/$fixed/nordic_*.nc\""
+done
+sj=$(sbatch --parsable --dependency=afterany$deps --partition=defq --cpus-per-task=8 --time=02:00:00 \
+    --job-name=screen-r2 --output="$HOME/bris-runs/tail-variants/screening.log" \
+    --wrap "source scripts/env.sh; export OMP_NUM_THREADS=8 PYTHONUNBUFFERED=1; git pull -q; ~/bris-env/.venv/bin/python scripts/screen_variants.py $models --observations $HOME/bris-runs/observations-val --cache $HOME/bris-runs/tail-variants/screening-cases.npz --out $HOME/bris-runs/tail-variants/screening.json")
+echo "$sj" > "$CHAIN/screening-job"
+echo "=== all arms in; screening submitted as $sj, after${deps//:/ }"
