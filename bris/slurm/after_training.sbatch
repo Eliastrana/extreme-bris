@@ -69,7 +69,9 @@ mkdir -p "$(dirname "$dest")"
 cp -n "$ckpt" "$dest"
 echo "=== $ARM: $ckpt -> $dest"
 
-fc=$(sbatch --parsable --partition=h200q --gres=gpu:1 --time=04:00:00 \
+# Either an H200 or a whole A100 80 GB will do for inference; a card on
+# either may be held for a week, so asking for both is what starts it soonest.
+fc=$(sbatch --parsable --partition=h200q,hgx2q --gres=gpu:1 --time=04:00:00 \
     --export=ALL,BRIS_TAG=$ARM,BRIS_CHECKPOINT=$dest,BRIS_OUTPUT_DIR=$V/$ARM,BRIS_START=2025-04-01,BRIS_END=2025-07-31,BRIS_STEP_DAYS=2,BRIS_LEADTIMES=7,BRIS_LAM_ZARR=meps-2p5km-year2-6h-v1.zarr,BRIS_GLOBAL_ZARR=od-an-n320-year2-6h-v1.zarr \
     bris/slurm/bris_forecast.sbatch) || { echo "ERROR: forecast submission failed" >&2; exit 1; }
 echo "$fc" > "$CHAIN/$ARM.forecast-job"
