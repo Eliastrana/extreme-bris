@@ -3,6 +3,7 @@
     PYTHONPATH=. ~/bris-env/.venv/bin/python -m unittest tests.test_losses
 """
 
+import math
 import unittest
 
 import torch
@@ -30,7 +31,7 @@ class ChainValue(unittest.TestCase):
         self.assertLess(float((soft - hard)[far].abs().max()), 1e-3)
         # the most it differs, at the threshold itself, is s * log 2
         self.assertAlmostEqual(float(chain_value(torch.tensor([self.t], dtype=torch.float64), self.t, s)),
-                               self.t + s * torch.log(torch.tensor(2.0)).item(), places=9)
+                               self.t + s * math.log(2.0), places=9)
 
     def test_soft_keeps_members_below_t_distinct(self):
         members = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64)  # all below t
