@@ -65,7 +65,10 @@ fi
 mkdir -p "$CHAIN" logs
 
 log="logs/finetune-$TRAIN_JOB.out"
-run_dir="$(grep -m1 -o 'Checkpoints path: .*' "$log" 2>/dev/null | sed 's/Checkpoints path: //')"
+# The last path, not the first: a job the cluster requeues (g003 crashed on
+# 2026-10-03 and restarted tail-e from the beginning) may append a second run
+# to the same log, and only the last one reached the step this looks for.
+run_dir="$(grep -o 'Checkpoints path: .*' "$log" 2>/dev/null | tail -1 | sed 's/Checkpoints path: //')"
 [[ -n "$run_dir" && -d "$run_dir" ]] || { echo "ERROR: no checkpoint path in $log" >&2; exit 1; }
 ckpt="$(ls "$run_dir"/inference-anemoi-by_step-epoch_*-step_${STEP}.ckpt 2>/dev/null | head -1)"
 [[ -n "$ckpt" ]] || { echo "ERROR: no step-$STEP inference checkpoint in $run_dir" >&2; exit 1; }

@@ -45,7 +45,11 @@ training:
           tail_variable: tp
           tail_index: 38
           tail_scale: 1.0
-    # NOT YET MEASURED. Set from measure_tail_weight.py with this config, as a
-    # tenth of weight_equal_on_extremes. Until then the placeholder below
-    # leaves the term negligible, and finetune.sbatch refuses to train it.
-    loss_weights: [1.0, 1.0]
+    # MEASURED: measure_tail_weight.py on CPU, TAILW_CONFIG=finetune_tail_d,
+    # 2026-10-03, jobs 1423355-1423361, the same 23 extreme and 23 ordinary
+    # states as A to C (~/bris-runs/tail-weight/measure-cpu-merged-d.json).
+    # Equal on extreme states at 765.5 (median of per-state ratios 851.8),
+    # against B's 839.8: the soft edge adds a little below 5 mm. A tenth of it
+    # below, the dose of A to C, 1/11 of an extreme state's loss and about 3
+    # percent over the whole window.
+    loss_weights: [1.0, 76.55]
