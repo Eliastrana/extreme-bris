@@ -75,6 +75,31 @@ LOGGER = logging.getLogger(__name__)
 _REPORT_FIRST = 5
 
 
+def chain_value(x: torch.Tensor, threshold: float, softness: float = 0.0) -> torch.Tensor:
+    """The chaining function v, hard or soft.
+
+    softness 0 is the indicator weight w(z) = 1{z >= t}, v(z) = max(z, t): the
+    tail arm and variants A to C.
+
+    softness s > 0 is the logistic weight w(z) = sigmoid((z - t) / s), whose
+    antiderivative is v(z) = t + s * log(1 + exp((z - t) / s)), a softplus.
+    WHY. The screening of 2026-10-03 found the ensemble collapse grows with
+    how hard the threshold clips: under max(z, t) every member below t is the
+    same number, and the spread half of the kernel score has nothing left to
+    reward among them. The softplus keeps members below t distinct, pressed
+    together more the further below they are, but never equal. As s goes to
+    0 it is max(z, t) again, so the hard threshold is one end of this, not a
+    different term. It is still a non-decreasing v, so the score is still a
+    proper threshold-weighted CRPS (Allen, Ginsbourger and Ziegel 2023).
+
+    torch's softplus switches to the identity above beta * x > 20, where the
+    two agree to float precision, so large values do not overflow.
+    """
+    if softness == 0.0:
+        return x.clamp(min=threshold)
+    return threshold + torch.nn.functional.softplus(x - threshold, beta=1.0 / softness)
+
+
 class TailWeightedKernelCRPS(AlmostFairKernelCRPS):
     """AlmostFairKernelCRPS scored on max(x, threshold) of one variable.
 
@@ -107,6 +132,7 @@ class TailWeightedKernelCRPS(AlmostFairKernelCRPS):
         tail_variable: str = "tp",
         tail_index: int | None = None,
         tail_scale: float = 1.0,
+        tail_softness: float = 0.0,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
@@ -141,6 +167,9 @@ class TailWeightedKernelCRPS(AlmostFairKernelCRPS):
         self.tail_variable = tail_variable
         self.tail_index = int(index)
         self.tail_scale = float(tail_scale)
+        self.tail_softness = float(tail_softness)
+        if self.tail_softness < 0:
+            raise ValueError(f"tail_softness must be 0 or positive, got {tail_softness}")
         self._seen = 0
 
         # The base class's forward may name its arguments anything. Learn the
@@ -160,10 +189,11 @@ class TailWeightedKernelCRPS(AlmostFairKernelCRPS):
 
         LOGGER.info(
             "tail term: %s at output channel %d, threshold %.6g normalised, "
-            "scale %.6g",
+            "softness %.6g, scale %.6g",
             self.tail_variable,
             self.tail_index,
             self.tail_threshold,
+            self.tail_softness,
             self.tail_scale,
         )
 
@@ -202,7 +232,9 @@ class TailWeightedKernelCRPS(AlmostFairKernelCRPS):
                 "variables are not the last axis in this anemoi version."
             )
         out = torch.zeros_like(x)
-        out[..., self.tail_index] = x[..., self.tail_index].clamp(min=self.tail_threshold)
+        out[..., self.tail_index] = chain_value(
+            x[..., self.tail_index], self.tail_threshold, self.tail_softness
+        )
         return out
 
     def forward(self, *args, **kwargs):
