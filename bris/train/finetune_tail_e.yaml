@@ -1,0 +1,26 @@
+# tail-mm: none   (read by finetune.sbatch's threshold check)
+# TAIL VARIANT E: VARIANT C AT A THIRD OF ITS DOSE.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_e
+#   scripts/diff_configs.py finetune_tail_c finetune_tail_e
+#
+# C, the tail term with no threshold, was the only variant of round 2 that
+# widened the ensemble, and it beat the control arm on ordinary CRPS by 1.9
+# percent. It failed on heavy rain because it overshot: it forecast days over
+# 20 mm about 1.3 times too often (occurrence ratio 0.76, against the control
+# arm's 1.19, too few). This asks whether a smaller dose lands between the two.
+#
+# CHOSEN AFTER SEEING C's RESULT, which is why it is a candidate in a new round
+# with its own frozen plan and not a correction of round 2's verdict.
+#
+# A third of C's weight: 39.09 / 3. C's term was 1/11 of an extreme state's
+# loss; at this weight it is about 1/31. Same term, so no new measurement:
+# the ratio of the two terms scales with the weight.
+
+defaults:
+- finetune_tail_c
+- _self_
+
+training:
+  training_loss:
+    loss_weights: [1.0, 13.03]

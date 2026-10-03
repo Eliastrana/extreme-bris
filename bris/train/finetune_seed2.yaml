@@ -1,0 +1,25 @@
+# base-seed: 20261003   (read by finetune.sbatch)
+# CONTROL ARM, SECOND DRAW: THE SAME RUN WITH A DIFFERENT SEED.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_seed2
+#   scripts/diff_configs.py finetune finetune_seed2
+#
+# Every comparison so far is one training run against one training run. Wessel
+# et al. (2026) found that training randomness alone moves tail behaviour a
+# lot, even where ordinary scores barely change. This is the control arm
+# again, stopped at step 2 000 like the screening runs, with only the seed
+# changed: which samples it draws in which order, and the noise the ensemble
+# members get. Scored against control2000, it shows how large a difference two
+# identical recipes produce by chance, which is the yardstick the candidates'
+# differences have been missing.
+#
+# Not a candidate. It is never ranked; it is reported next to them.
+
+defaults:
+- finetune
+- _self_
+
+training:
+  max_steps: 2000
+  lr:
+    iterations: 3000

@@ -1,0 +1,51 @@
+# tail-mm: 5   (read by finetune.sbatch's threshold check)
+# TAIL VARIANT D: VARIANT B'S THRESHOLD, MADE SOFT.
+#
+#   TAILW_CONFIG=finetune_tail_d TAILW_TAG=d  sbatch bris/slurm/measure_tail_weight_cpu.sbatch k/n
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_d
+#   scripts/diff_configs.py finetune_tail_b finetune_tail_d
+#
+# Screening round 2 found the spread collapse grows with how hard the
+# threshold clips, at a fixed dose: 20 mm collapsed, 5 mm a little, no
+# threshold widened the ensemble. Under max(z, t) every member below t is the
+# same number, and the spread half of the kernel score has nothing to reward
+# among them. This keeps B's threshold, 5 mm per 6 h, and replaces the hard
+# clip with a softplus, so members below t are pressed together but never
+# made equal (xbris.losses.chain_value):
+#
+#   v(z) = t + s * log(1 + exp((z - t) / s)),   weight w(z) = sigmoid((z - t) / s)
+#
+# s = 2 mm per 6 h: the weight is 0.5 at 5 mm, 0.12 at 1 mm and 0.82 at 8 mm.
+# At softness 0 this is B exactly, so D differs from B in that one number and
+# the weight, which is measured for this term and set to the same dose as A
+# to C: a tenth of the weight that makes the terms equal on extreme states.
+#
+# Stopped at step 2 000 on the 3 000-step learning-rate schedule, as A to C.
+
+defaults:
+- finetune_tail
+- _self_
+
+training:
+  max_steps: 2000
+  lr:
+    iterations: 3000
+  training_loss:
+    losses:
+        - _target_: anemoi.training.losses.AlmostFairKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+        - _target_: xbris.losses.TailWeightedKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'lam_node_weights']
+          # 5 mm per 6 h, as B: 0.005 m * 422.037 (scripts/tail_threshold.py --mm 5)
+          tail_threshold: 2.1101857
+          # 2 mm per 6 h in the same units: 0.002 m * 422.037
+          tail_softness: 0.844074
+          tail_variable: tp
+          tail_index: 38
+          tail_scale: 1.0
+    # NOT YET MEASURED. Set from measure_tail_weight.py with this config, as a
+    # tenth of weight_equal_on_extremes. Until then the placeholder below
+    # leaves the term negligible, and finetune.sbatch refuses to train it.
+    loss_weights: [1.0, 1.0]

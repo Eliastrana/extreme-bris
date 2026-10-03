@@ -128,7 +128,12 @@ export ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER="${ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER:
 
 export NCCL_P2P_DISABLE=1
 export HYDRA_FULL_ERROR=1
-export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-20260909}"
+# The seed is shared by every arm so they draw the same samples in the same
+# order. An arm that exists to measure what a different draw does says so in a
+# "# base-seed:" line; that line is the record, not an export someone has to
+# remember at submission.
+CONFIG_SEED="$(grep -m1 -E '^# base-seed:' "$CONFIG" | awk '{print $3}')"
+export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-${CONFIG_SEED:-20260909}}"
 echo "=== seed    : $ANEMOI_BASE_SEED"
 echo "=== chunks  : $ANEMOI_INFERENCE_NUM_CHUNKS outside training, mappers $ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER"
 
