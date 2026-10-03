@@ -133,7 +133,7 @@ def score_lead(lead: int, cases: dict, labels: list[str], comparator: str, other
     return out
 
 
-def decide(primary: dict, candidates: list[str], reference: list[str]) -> dict:
+def decide(primary: dict, candidates: list[str], reference: list[str], tie_order: list[str]) -> dict:
     verdicts = {}
     for l in candidates + reference:
         v = primary["versus_comparator"][l]
@@ -149,7 +149,7 @@ def decide(primary: dict, candidates: list[str], reference: list[str]) -> dict:
         tw = {l: primary["versus_comparator"][l][f"twcrps_{RANK_THRESHOLD:g}"]["first"] for l in passing}
         best = min(tw.values())
         tied = [l for l in passing if tw[l] - best <= TIE]
-        winner = sorted(tied, key=lambda l: TIE_ORDER.index(l) if l in TIE_ORDER else len(TIE_ORDER))[0]
+        winner = sorted(tied, key=lambda l: tie_order.index(l) if l in tie_order else len(tie_order))[0]
     return {"verdicts": verdicts, "passing": passing, "winner": winner}
 
 
@@ -170,8 +170,13 @@ def main() -> int:
         raise SystemExit(f"{args.plan} is not frozen; freeze it before scoring anything")
     comparator = plan["comparator"]
     candidates = list(plan["candidates"])
-    reference = list(plan.get("reference", {}))
+    # A noise reference is the comparator's own recipe trained again with
+    # another seed: scored like a reference, never ranked, and its distance
+    # from the comparator is how far apart chance alone puts two runs.
+    noise = list(plan.get("noise_reference", {}))
+    reference = list(plan.get("reference", {})) + noise
     labels = [comparator] + candidates + reference
+    tie_order = list(plan.get("tie_order", TIE_ORDER))
     specs = dict(item.split("=", 1) for item in args.model)
     if set(specs) != set(labels):
         raise SystemExit(f"need models {labels}, got {sorted(specs)}")
@@ -200,7 +205,8 @@ def main() -> int:
     primary = report["leads"][str(primary_lead)]
     days = np.unique(cases[f"dates_{primary_lead}"].astype("datetime64[D]")).size
     report["cycles_scored"] = int(days)
-    report["decision"] = decide(primary, candidates, reference)
+    report["decision"] = decide(primary, candidates, reference, tie_order)
+    report["noise_reference"] = noise
 
     print(f"plan {report['plan_sha256'][:12]}, frozen {plan['frozen_at']}, "
           f"{days} forecast days, {primary['cases']:,} station-days at +{primary_lead} h")
@@ -215,7 +221,7 @@ def main() -> int:
         v = primary["versus_comparator"][l]
         r, w = v["spread_skill_ratio"], v["twcrps_20"]
         d = report["decision"]["verdicts"][l]
-        tag = "reference" if d["is_reference"] else ("PASSES" if d["passes"] else "out")
+        tag = ("noise reference" if l in noise else "reference") if d["is_reference"] else ("PASSES" if d["passes"] else "out")
         print(f"  {l:12s} ratio {r['difference']:+.3f} [{r['ci_lower']:+.3f}, {r['ci_upper']:+.3f}] "
               f"{'ok' if d['gate_spread'] else 'FAIL'}   "
               f"tw20 {w['mean_difference']:+.4f} [{w['ci_lower']:+.4f}, {w['ci_upper']:+.4f}] "

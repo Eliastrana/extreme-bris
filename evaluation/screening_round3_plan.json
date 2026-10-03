@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-03",
+  "status": "FROZEN on the day E and F started training, before any of D, E or F had produced a checkpoint or a forecast. The SHA-256 of this file is recorded in the commit that froze it and in every screening report.",
+  "title": "Screening round 3: a soft threshold, a smaller dose without one, and what chance alone does",
+  "note": "Follows round 2 (screening_round2_plan.json), whose threshold series at fixed dose found the spread collapse grows with how hard the threshold clips. Selection on the validation period only; a candidate that passes needs a full-length run and a separate frozen test on data no choice here has seen, the winter 2026-27 data.",
+
+  "period": {"start": "2025-04-01", "end": "2025-07-31", "cycle_hour_utc": 0, "every_nth_day": 2, "expected_cycles": 61},
+  "ensemble_members": 4,
+  "strict_common_cases": true,
+  "leads_hours": [30],
+  "primary_lead_hours": 30,
+  "observations": {"source": "Frost precipitation_daily", "window": "06-06 UTC", "max_quality": 4, "max_distance_km": 5.0, "apply_gauge_screen": true},
+  "forecast_accumulation": "per_step",
+  "bootstrap": {"block_days": 7, "replicates": 2000},
+
+  "comparator": "control2000",
+  "candidates": {
+    "tailD2000": "finetune_tail_d at step 2000: variant B's threshold of 5 mm per 6 h with a softplus instead of a hard clip, softness 2 mm per 6 h, weight a tenth of its measured equal-on-extremes weight (measured before it trains), the dose of A to C",
+    "tailE2000": "finetune_tail_e at step 2000: variant C, the term with no threshold, at a third of C's weight, 13.03. Chosen after seeing C's round-2 result, which is why it is screened here and not there"
+  },
+  "reference": {"tailC2000": "variant C from round 2, scored alongside so E's change from it can be read"},
+  "noise_reference": {"control2000s2": "finetune_seed2 at step 2000: the control arm again with base seed 20261003 instead of 20260909. Never ranked. Its difference from control2000 on every measure is the size of a difference between two identical recipes"},
+  "tie_order": ["tailE2000", "tailD2000"],
+  "training_matched": "Every model at step 2000 of the same 3 000-step learning-rate schedule, same data and ensemble size; same seed except the noise reference.",
+
+  "gate_spread": {
+    "measure": "spread-skill ratio difference, candidate minus control2000, lead 30 h",
+    "fails_if": "the point estimate is below -0.05 or the upper 95% bound is below -0.025",
+    "why": "Unchanged from round 2, so the rounds compare."
+  },
+  "ranking_metric": {
+    "measure": "fair twCRPS at 20 mm per day, candidate minus control2000, lead 30 h",
+    "passes_if": "the point estimate is at or below 0"
+  },
+  "guard_ordinary_weather": {
+    "measure": "fair CRPS over all cases, candidate minus control2000, lead 30 h",
+    "fails_if": "the candidate is more than 1 percent worse"
+  },
+  "decision": {
+    "pass": "passes the spread gate, the ranking metric and the guard",
+    "winner": "the passing candidate with the lowest twCRPS at 20 mm; ties within 0.002 go to the lower weight (E, then D)",
+    "if_none_pass": "No full-length run of a loss variant. Report rounds 2 and 3 together, with the noise reference as the yardstick, and move the effort to post-processing.",
+    "reading_with_noise": "A winner whose twCRPS advantage is smaller than the noise reference's own distance from control2000 is reported as indistinguishable from chance, though the rules above still name it."
+  },
+
+  "reported_not_decisive": [
+    "fair twCRPS at 50 mm per day",
+    "occurrence ratio O_t and share of exceedances no member reached, at 10, 20 and 50 mm",
+    "spread-skill ratio by forecast amount",
+    "the noise reference's differences from control2000 on every measure above"
+  ]
+}

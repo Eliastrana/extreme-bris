@@ -44,7 +44,13 @@ ARM="${ARM:?set ARM, e.g. tailA2000}"
 TRAIN_JOB="${TRAIN_JOB:?set TRAIN_JOB, the training job id}"
 STEP="${STEP:-002000}"
 REPO_DIR="${BRIS_REPO_DIR:-$HOME/extreme-bris}"
-CHAIN="$HOME/bris-runs/tail-variants/chain"
+# One chain per screening round. Defaults are round 2's, which this was
+# written for; a later round passes its own directory, plan, fixed models and
+# output, so its files never meet the earlier round's.
+CHAIN="${CHAIN_DIR:-$HOME/bris-runs/tail-variants/chain}"
+PLAN="${PLAN:-evaluation/screening_round2_plan.json}"
+FIXED_MODELS="${FIXED_MODELS:-control2000 tail2000}"
+OUT_DIR="${OUT_DIR:-$HOME/bris-runs/tail-variants}"
 V="$HOME/bris-runs/validation-forecasts"
 export PATH=/cm/shared/apps/slurm/21.08.8/bin:$PATH
 cd "$REPO_DIR" || exit 1
@@ -90,11 +96,11 @@ while read -r arm; do
     deps="$deps:$(cat "$CHAIN/$arm.forecast-job")"
     models="$models --model \"$arm=$V/$arm/nordic_*.nc\""
 done < "$CHAIN/expected.txt"
-for fixed in control2000 tail2000; do
+for fixed in $FIXED_MODELS; do
     models="$models --model \"$fixed=$V/$fixed/nordic_*.nc\""
 done
 sj=$(sbatch --parsable --propagate=NONE --dependency=afterany$deps --partition=defq --cpus-per-task=8 --time=02:00:00 \
-    --job-name=screen-r2 --output="$HOME/bris-runs/tail-variants/screening.log" \
-    --wrap "source scripts/env.sh; export OMP_NUM_THREADS=8 PYTHONUNBUFFERED=1; git pull -q; ~/bris-env/.venv/bin/python scripts/screen_variants.py $models --observations $HOME/bris-runs/observations-val --cache $HOME/bris-runs/tail-variants/screening-cases.npz --out $HOME/bris-runs/tail-variants/screening.json")
+    --job-name=screen --output="$OUT_DIR/screening.log" \
+    --wrap "source scripts/env.sh; export OMP_NUM_THREADS=8 PYTHONUNBUFFERED=1; git pull -q; ~/bris-env/.venv/bin/python scripts/screen_variants.py --plan $PLAN $models --observations $HOME/bris-runs/observations-val --cache $OUT_DIR/screening-cases.npz --out $OUT_DIR/screening.json")
 echo "$sj" > "$CHAIN/screening-job"
 echo "=== all arms in; screening submitted as $sj, after${deps//:/ }"
