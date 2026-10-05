@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-05",
+  "status": "EXPLORATORY. A first look at variant E alone, made because its forecasts finished two days before D's and F's. It decides nothing: the round-3 verdict is screening_round3_plan.json, with D, E and the noise reference F together. Whatever this shows, D and F are already trained or training with configs frozen before it ran.",
+  "title": "Exploratory first look: variant E against control2000 and variant C",
+  "note": "Same days, cases, scoring and thresholds as round 3, so the numbers here are the ones the round-3 report will contain for E. Without F there is no yardstick for chance, so no difference here is read as real or not.",
+  "period": {
+    "start": "2025-04-01",
+    "end": "2025-07-31",
+    "cycle_hour_utc": 0,
+    "every_nth_day": 2,
+    "expected_cycles": 61
+  },
+  "ensemble_members": 4,
+  "strict_common_cases": true,
+  "leads_hours": [
+    30
+  ],
+  "primary_lead_hours": 30,
+  "observations": {
+    "source": "Frost precipitation_daily",
+    "window": "06-06 UTC",
+    "max_quality": 4,
+    "max_distance_km": 5.0,
+    "apply_gauge_screen": true
+  },
+  "forecast_accumulation": "per_step",
+  "bootstrap": {
+    "block_days": 7,
+    "replicates": 2000
+  },
+  "comparator": "control2000",
+  "gate_spread": {
+    "measure": "spread-skill ratio difference, candidate minus control2000, lead 30 h",
+    "fails_if": "the point estimate is below -0.05 or the upper 95% bound is below -0.025",
+    "why": "Unchanged from round 2, so the rounds compare."
+  },
+  "ranking_metric": {
+    "measure": "fair twCRPS at 20 mm per day, candidate minus control2000, lead 30 h",
+    "passes_if": "the point estimate is at or below 0"
+  },
+  "guard_ordinary_weather": {
+    "measure": "fair CRPS over all cases, candidate minus control2000, lead 30 h",
+    "fails_if": "the candidate is more than 1 percent worse"
+  },
+  "training_matched": "Every model at step 2000 of the same 3 000-step learning-rate schedule, same data and ensemble size; same seed except the noise reference.",
+  "candidates": {
+    "tailE2000": "finetune_tail_e at step 2000: variant C, the term with no threshold, at a third of C's weight, 13.03. Chosen after seeing C's round-2 result, which is why it is screened here and not there"
+  },
+  "reference": {
+    "tailC2000": "variant C from round 2, scored alongside so E's change from it can be read"
+  },
+  "tie_order": [
+    "tailE2000"
+  ]
+}
