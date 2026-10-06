@@ -35,6 +35,20 @@ gauge cell, gauge finite and screened):
              did not, whatever the calibration. 0.5 is no skill, 1 perfect.
   reliability  observed frequency in bins of p.
 Differences in Brier from r = 0 carry a paired seven-day block bootstrap.
+
+PLACEMENT OR SAMPLE SIZE. Four members give five possible probabilities, and a
+neighbourhood averages hundreds of cells, so part of any gain could be sample
+size alone. To separate the two, every subset of 1 to M members is scored and
+the Brier score is extrapolated to an infinite ensemble, per radius:
+
+    Brier(m) = Brier(infinite) + b / m     fitted over m = 1..M
+
+which is the known dependence of the Brier score on ensemble size (the fair
+Brier score at r = 0 is the same correction in closed form, a check on the
+fit). Neighbourhoods are linear in the members, so a subset's neighbourhood is
+the mean of its members' neighbourhoods and nothing is recomputed. If a
+neighbourhood still beats the point at infinite size, the gain is placement;
+if the advantage vanishes, it was sample size.
 """
 
 from __future__ import annotations
@@ -51,6 +65,7 @@ _venv.ensure("xarray", "numpy", "scipy")
 
 import numpy as np  # noqa: E402
 import xarray as xr  # noqa: E402
+from itertools import combinations  # noqa: E402
 from scipy.ndimage import convolve  # noqa: E402
 
 import evaluate_experiment as ev  # noqa: E402
@@ -88,6 +103,30 @@ def daily_field(path: Path, accumulation: str) -> np.ndarray:
     leads = ((times - times[0]) / np.timedelta64(1, "h")).astype(int)
     steps, _ = deaccumulate(field.reshape(t, m, ny * nx), accumulation)
     return daily_sums(steps, leads, [LEAD])[0].reshape(m, ny, nx)
+
+
+def extrapolated_cases(q: np.ndarray, event: np.ndarray) -> np.ndarray:
+    """Per-case Brier score extrapolated to infinitely many members.
+
+    q is members x cases. For each subset size m the per-case Brier is
+    averaged over every subset of that size; a least-squares line in 1/m over
+    m = 1..M is fitted, and its intercept is a fixed linear combination of the
+    per-m scores, so it can be applied case by case and bootstrapped.
+    """
+    m_all = q.shape[0]
+    sizes = np.arange(1, m_all + 1)
+    per_m = []
+    for m in sizes:
+        subsets = list(combinations(range(m_all), m))
+        acc = np.zeros(q.shape[1])
+        for sub in subsets:
+            acc += (q[list(sub)].mean(axis=0) - event) ** 2
+        per_m.append(acc / len(subsets))
+    x = 1.0 / sizes
+    xc = x - x.mean()
+    # intercept = mean(y) - slope * mean(x), slope = sum(xc * y) / sum(xc^2)
+    weights = 1.0 / len(sizes) - x.mean() * xc / (xc ** 2).sum()
+    return np.tensordot(weights, np.stack(per_m), axes=1)
 
 
 def roc_area(p: np.ndarray, o: np.ndarray) -> float:
@@ -173,16 +212,19 @@ def main() -> int:
             f = fields[l]
             got["members"] = f.shape[0]
             inside = np.isfinite(f).all(axis=0).astype("float64")
+            dens = {rc: convolve(inside, kernels[rc], mode="constant", cval=0.0) for rc in kernels}
             for t in THRESHOLDS:
-                share = np.where(inside > 0, (np.nan_to_num(f, nan=0.0) > t).mean(axis=0), 0.0)
+                hit = np.where(inside > 0, np.nan_to_num(f, nan=0.0) > t, False).astype("float64")
                 for r_km, rc in zip(RADII_KM, radii):
-                    if rc == 0:
-                        nb = share
-                    else:
-                        num = convolve(share, kernels[rc], mode="constant", cval=0.0)
-                        den = convolve(inside, kernels[rc], mode="constant", cval=0.0)
-                        nb = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
-                    got["p"][l][t][r_km].append(nb[row, col][common])
+                    per_member = []
+                    for k in range(hit.shape[0]):
+                        if rc == 0:
+                            nb = hit[k]
+                        else:
+                            num = convolve(hit[k], kernels[rc], mode="constant", cval=0.0)
+                            nb = np.divide(num, dens[rc], out=np.zeros_like(num), where=dens[rc] > 0)
+                        per_member.append(nb[row, col][common])
+                    got["p"][l][t][r_km].append(np.stack(per_member))
         print(f"  {cycle[:10]}: {int(common.sum())} gauges", flush=True)
 
     o = np.concatenate(got["obs"])
@@ -197,8 +239,10 @@ def main() -> int:
             event = (o > t).astype("float64")
             base = None
             rows = {}
+            q = {r_km: np.concatenate(got["p"][l][t][r_km], axis=1) for r_km in RADII_KM}
+            inf_cases = {r_km: extrapolated_cases(q[r_km], event) for r_km in RADII_KM}
             for r_km in RADII_KM:
-                p = np.concatenate(got["p"][l][t][r_km])
+                p = q[r_km].mean(axis=0)
                 bs_cases = (p - event) ** 2
                 row = {"brier": float(bs_cases.mean()), "roc_area": roc_area(p, event),
                        "mean_p": float(p.mean()), "event_rate": float(event.mean()),
@@ -210,10 +254,17 @@ def main() -> int:
                     bt = paired_block_bootstrap(bs_cases - base, dates, block_days=7, replicates=args.replicates)
                     row["brier_minus_point"] = {"mean": bt["mean_difference"], "ci_lower": bt["ci_lower"],
                                                 "ci_upper": bt["ci_upper"]}
+                row["brier_infinite_members"] = float(inf_cases[r_km].mean())
+                if r_km != 0.0:
+                    bt = paired_block_bootstrap(inf_cases[r_km] - inf_cases[0.0], dates, block_days=7,
+                                                replicates=args.replicates)
+                    row["infinite_minus_point_infinite"] = {"mean": bt["mean_difference"],
+                                                            "ci_lower": bt["ci_lower"], "ci_upper": bt["ci_upper"]}
                 rows[f"{r_km:g}"] = row
             report["models"][l][f"{t:g}"] = {"events": int(event.sum()), "radii": rows}
             print(f"\n{l}, {t:g} mm: {int(event.sum()):,} gauge-days over, rate {event.mean():.4f}")
-            print(f"  {'radius':>8s} {'Brier':>8s} {'vs point':>24s} {'ROC area':>9s} {'mean p':>7s}")
+            print(f"  {'radius':>8s} {'Brier':>8s} {'vs point':>24s} {'ROC area':>9s} {'mean p':>7s}"
+                  f"   {'Brier, inf. members':>18s} {'vs point, inf. members':>26s}")
             for r_km in RADII_KM:
                 row = rows[f"{r_km:g}"]
                 if r_km == 0.0:
@@ -221,7 +272,13 @@ def main() -> int:
                 else:
                     d = row["brier_minus_point"]
                     extra = f"{d['mean']:+.5f} [{d['ci_lower']:+.5f}, {d['ci_upper']:+.5f}]"
-                print(f"  {r_km:6.1f}km {row['brier']:8.5f} {extra:>24s} {row['roc_area']:9.3f} {row['mean_p']:7.4f}")
+                if r_km == 0.0:
+                    inf_extra = ""
+                else:
+                    d = row["infinite_minus_point_infinite"]
+                    inf_extra = f"{d['mean']:+.5f} [{d['ci_lower']:+.5f}, {d['ci_upper']:+.5f}]"
+                print(f"  {r_km:6.1f}km {row['brier']:8.5f} {extra:>24s} {row['roc_area']:9.3f} {row['mean_p']:7.4f}"
+                      f"   {row['brier_infinite_members']:18.5f} {inf_extra:>26s}")
 
     args.out.expanduser().parent.mkdir(parents=True, exist_ok=True)
     args.out.expanduser().write_text(json.dumps(report, indent=2) + "\n")
