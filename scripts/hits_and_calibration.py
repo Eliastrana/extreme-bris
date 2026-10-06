@@ -71,6 +71,18 @@ def contingency(ens: np.ndarray, obs: np.ndarray, t: float, k: int) -> dict:
             "frequency_bias": n_yes / n_event if n_event else float("nan")}
 
 
+def roc_area(p: np.ndarray, o: np.ndarray) -> float:
+    """Mann-Whitney ROC area with ties counted as half."""
+    pos, neg = p[o == 1], p[o == 0]
+    if not pos.size or not neg.size:
+        return float("nan")
+    levels = np.unique(p)
+    npos = np.array([(pos == v).sum() for v in levels], dtype=float)
+    nneg = np.array([(neg == v).sum() for v in levels], dtype=float)
+    below = np.concatenate([[0.0], np.cumsum(nneg)[:-1]])
+    return float(((npos * below).sum() + 0.5 * (npos * nneg).sum()) / (pos.size * neg.size))
+
+
 def isotonic(x: np.ndarray, y: np.ndarray) -> dict[float, float]:
     """Pool-adjacent-violators on the distinct values of x; returns value -> fit."""
     levels = np.unique(x)
@@ -144,9 +156,11 @@ def main() -> int:
         event = o > t
         res = {"events": int(event.sum()), "models": {}}
         tw = {l: threshold_weighted_crps_cases(ens[l], o, t) for l in labels}
+        cal_cases = {}
         for l in labels:
             p = (ens[l] > t).mean(axis=1)
             cal = calibrated_cv(p, event.astype(float), block)
+            cal_cases[l] = (cal - event) ** 2
             res["models"][l] = {
                 "contingency": {f"at_least_{k}_of_{m}": contingency(ens[l], o, t, k) for k in YES_K},
                 "twcrps": float(tw[l].mean()),
@@ -154,6 +168,7 @@ def main() -> int:
                 "twcrps_from_non_event_days": float(np.where(~event, tw[l], 0.0).mean()),
                 "brier": float(((p - event) ** 2).mean()),
                 "brier_calibrated_cv": float(((cal - event) ** 2).mean()),
+                "roc_area": roc_area(p, event.astype(float)),
                 "calibration_map_all_data": isotonic(p, event.astype(float)),
             }
         for l in labels:
@@ -165,6 +180,10 @@ def main() -> int:
                 bt = paired_block_bootstrap(d, dates, block_days=7, replicates=args.replicates)
                 diffs[name] = {"mean": bt["mean_difference"], "ci_lower": bt["ci_lower"], "ci_upper": bt["ci_upper"]}
             res["models"][l]["twcrps_parts_minus_comparator"] = diffs
+            bt = paired_block_bootstrap(cal_cases[l] - cal_cases[args.comparator], dates, block_days=7,
+                                        replicates=args.replicates)
+            res["models"][l]["calibrated_brier_minus_comparator"] = {
+                "mean": bt["mean_difference"], "ci_lower": bt["ci_lower"], "ci_upper": bt["ci_upper"]}
         report["thresholds"][f"{t:g}"] = res
 
         print(f"\n===== {t:g} mm: {int(event.sum()):,} gauge-days over")
@@ -192,7 +211,13 @@ def main() -> int:
             r = res["models"][l]
             mp = ", ".join(f"{k:.2f}->{v:.3f}" for k, v in sorted(r["calibration_map_all_data"].items()))
             print(f"  {l:12s} {r['brier']:.5f} -> {r['brier_calibrated_cv']:.5f} "
-                  f"({(r['brier_calibrated_cv'] / r['brier'] - 1):+.1%})   map: {mp}")
+                  f"({(r['brier_calibrated_cv'] / r['brier'] - 1):+.1%})   ROC area {r['roc_area']:.3f}   map: {mp}")
+        for l in labels:
+            if l == args.comparator:
+                continue
+            d = res["models"][l]["calibrated_brier_minus_comparator"]
+            print(f"    calibrated {l} - calibrated {args.comparator}: {d['mean']:+.5f} "
+                  f"[{d['ci_lower']:+.5f}, {d['ci_upper']:+.5f}]")
 
     args.out.expanduser().parent.mkdir(parents=True, exist_ok=True)
     args.out.expanduser().write_text(json.dumps(report, indent=2) + "\n")
