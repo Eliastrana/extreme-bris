@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-06",
+  "status": "FROZEN before any of the forecasts it scores existed: the test-year forecasts of control2000 and tailC2000, and the 16-member validation forecasts. The SHA-256 of this file is recorded in the commit that froze it.",
+  "title": "Does fine-tuning with extra weight on precipitation, followed by calibration, beat the calibrated control on heavy rain?",
+  "origin": "Exploratory analysis on the validation period (scripts/hits_and_calibration.py, 2026-10-06) found variant C worse than control2000 on raw heavy-rain scores through false alarms, yet better after week-out isotonic calibration: Brier at 10 mm -9 percent (interval excluding zero), at 20 mm -6 percent (interval touching zero), with a higher ROC area. Found after looking, on 61 days of one season; this plan tests it on data where neither model's calibration has been examined and C has never been scored.",
+
+  "models": {
+    "control2000": "finetune.yaml at step 2000 of the 3 000-step schedule: ~/bris-models/control/control-step002000_inference.ckpt",
+    "tailC2000": "finetune_tail_c at step 2000 of the same schedule: ~/bris-models/tailC2000/tailC2000-step002000_inference.ckpt"
+  },
+  "comparison": "tailC2000 minus control2000",
+
+  "test": {
+    "period": {"start": "2025-08-01", "end": "2026-09-06", "cycle_hour_utc": 0, "every_nth_day": 1},
+    "forecasts": "bris/slurm/bris_forecast.sbatch, 4 members, 7 lead times; 2025-08-01..2025-09-07 from the year2 datasets and 2025-09-08..2026-09-06 from year1, as the main evaluation",
+    "lead_hours": 30,
+    "cases": "strict common cases of control2000, tailC2000 and MEPS (~/bris-runs/meps/precipitation_daily.npz) at screened gauges (~/bris-runs/observations, quality code 4 or better, within 5 km), as the main evaluation",
+    "event": "gauge 06-06 UTC total above the threshold",
+    "probability": "share of the 4 members above the threshold"
+  },
+
+  "calibration": {
+    "primary": "isotonic regression of the event on the probability, per model and threshold, leave-one-calendar-month-out within the test period: every month is calibrated with a map fitted on all the other months (hits_and_calibration.py --cv month)",
+    "secondary": "isotonic maps fitted on the validation period (2025-04-01..2025-07-31, every second day; ~/bris-runs/round3/hits-calibration-cases.npz) and applied unchanged to the test period, fully out of sample (--fit-cache)"
+  },
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after primary calibration, tailC2000 minus control2000",
+    "uncertainty": "paired block bootstrap, seven-day calendar blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "secondary_reported": [
+    "the same at 10 and 50 mm",
+    "the same under secondary calibration",
+    "raw (uncalibrated) Brier, ROC area, hits and false alarms with yes at half and at a quarter of the members, twCRPS split into event and non-event days"
+  ],
+
+  "sample_size_check": {
+    "question": "Is C's advantage after calibration a sample-size effect of four members (a wetter model leaves fewer cases at probability 0), or does it hold with sixteen?",
+    "forecasts": "control2000 and tailC2000 with 16 members on the validation days (every second day 2025-04-01..2025-07-31)",
+    "reported": "week-out calibrated Brier and ROC area at 10 and 20 mm for 16 members against the same for 4; the C minus control difference with both",
+    "reading": "the advantage is a sample-size effect if it disappears with 16 members; real if it remains"
+  },
+
+  "neighbourhood_prediction": {
+    "registered": "From scripts/neighbourhood_probability.py on the 4-member validation forecasts (~/bris-runs/neighbourhood/control2000-tailC2000.json), extrapolated with Brier(m) = Brier(inf) + b/m. At 20 mm, 16 members at the gauge cell: control2000 0.0153 (4 members 0.01726, infinite 0.01469), tailC2000 0.0154 (0.01791, 0.01449). The best 4-member neighbourhood of control2000 scored 0.0162 (25 km).",
+    "reading": "if 16 members at the gauge cell reach about the extrapolated score and beat the best 4-member neighbourhood, the neighbourhood gain was sample size, as the extrapolation said"
+  },
+
+  "not_claimed": "Passing would show that weighting precipitation in fine-tuning adds information that calibration can use, at 2000 steps, on one season-spanning year, from one training run per arm. It would not show the same for a full-length run or another seed; those would be the next tests."
+}
