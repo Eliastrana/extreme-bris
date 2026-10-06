@@ -52,7 +52,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from xbris.evaluation import paired_block_bootstrap, threshold_weighted_crps_cases  # noqa: E402
 
 THRESHOLDS = [10.0, 20.0, 50.0]
-YES_K = [2, 1]
+# "Yes" when at least this share of the members exceed: 2 of 4 and 1 of 4,
+# and the same shares for a larger ensemble.
+YES_SHARES = [0.5, 0.25]
 LEAD = 30
 
 
@@ -123,6 +125,13 @@ def main() -> int:
     ap.add_argument("--end", default="2025-07-31")
     ap.add_argument("--replicates", type=int, default=2000)
     ap.add_argument("--cache", type=Path, default=None)
+    ap.add_argument("--meps", type=Path, default=None,
+                    help="MEPS point forecasts; with it, MEPS joins the strict common-case rule, as in the main evaluation")
+    ap.add_argument("--cv", choices=["week", "month"], default="week",
+                    help="the block each case is calibrated out of: seven-day blocks, or calendar months")
+    ap.add_argument("--fit-cache", type=Path, default=None,
+                    help="cases from another period (a --cache file of this script) to fit the calibration on instead; "
+                         "the fitted maps are applied to these cases, which are then fully out of sample")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
@@ -138,18 +147,27 @@ def main() -> int:
         with np.load(cache, allow_pickle=False) as data:
             cases = {k: data[k] for k in data.files}
     else:
-        cases = tc.collect(plan, specs, args.observations.expanduser(), None)
+        cases = tc.collect(plan, specs, args.observations.expanduser(),
+                           args.meps.expanduser() if args.meps else None)
         if cache:
             cache.parent.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(cache, **cases)
 
     o = cases[f"obs_{LEAD}"]
     dates = cases[f"dates_{LEAD}"].astype("datetime64[D]")
-    block = ((dates - dates.min()).astype(int) // 7)
+    if args.cv == "week":
+        block = ((dates - dates.min()).astype(int) // 7)
+    else:
+        block = dates.astype("datetime64[M]").astype(int)
+    fit = None
+    if args.fit_cache:
+        with np.load(args.fit_cache.expanduser(), allow_pickle=False) as data:
+            fit = {k: data[k] for k in data.files}
     ens = {l: cases[f"model_{l}_{LEAD}"] for l in labels}
     m = ens[labels[0]].shape[1]
     report = {"exploratory": True, "lead_hours": LEAD, "station_days": int(o.size), "members": int(m),
-              "thresholds": {}}
+              "calibration": ({"fitted_on": str(args.fit_cache)} if fit is not None else {"cross_validation": args.cv}),
+              "meps_in_common_cases": bool(args.meps), "thresholds": {}}
     print(f"{o.size:,} station-days, {m} members, +{LEAD} h, comparator {args.comparator}")
 
     for t in THRESHOLDS:
@@ -159,10 +177,17 @@ def main() -> int:
         cal_cases = {}
         for l in labels:
             p = (ens[l] > t).mean(axis=1)
-            cal = calibrated_cv(p, event.astype(float), block)
+            if fit is None:
+                cal = calibrated_cv(p, event.astype(float), block)
+            else:
+                pf = (fit[f"model_{l}_{LEAD}"] > t).mean(axis=1)
+                mapping = isotonic(pf, (fit[f"obs_{LEAD}"] > t).astype(float))
+                known = np.array(sorted(mapping))
+                cal = np.array([mapping[float(known[np.argmin(np.abs(known - v))])] for v in p])
             cal_cases[l] = (cal - event) ** 2
             res["models"][l] = {
-                "contingency": {f"at_least_{k}_of_{m}": contingency(ens[l], o, t, k) for k in YES_K},
+                "contingency": {f"at_least_{int(np.ceil(f * m))}_of_{m}": contingency(ens[l], o, t, int(np.ceil(f * m)))
+                                for f in YES_SHARES},
                 "twcrps": float(tw[l].mean()),
                 "twcrps_from_event_days": float(np.where(event, tw[l], 0.0).mean()),
                 "twcrps_from_non_event_days": float(np.where(~event, tw[l], 0.0).mean()),
@@ -187,10 +212,10 @@ def main() -> int:
         report["thresholds"][f"{t:g}"] = res
 
         print(f"\n===== {t:g} mm: {int(event.sum()):,} gauge-days over")
-        print(f"  {'model':12s} {'hits':>5s} {'miss':>5s} {'f.al.':>6s} {'hit rate':>8s} {'f.al. share':>11s} {'bias':>5s}   (yes = 2 of {m}; 1 of {m} in brackets)")
+        print(f"  {'model':12s} {'hits':>5s} {'miss':>5s} {'f.al.':>6s} {'hit rate':>8s} {'f.al. share':>11s} {'bias':>5s}   (yes = half the members; a quarter in brackets)")
         for l in labels:
-            c2 = res["models"][l]["contingency"][f"at_least_2_of_{m}"]
-            c1 = res["models"][l]["contingency"][f"at_least_1_of_{m}"]
+            c2 = res["models"][l]["contingency"][f"at_least_{int(np.ceil(0.5 * m))}_of_{m}"]
+            c1 = res["models"][l]["contingency"][f"at_least_{int(np.ceil(0.25 * m))}_of_{m}"]
             print(f"  {l:12s} {c2['hits']:5d} {c2['misses']:5d} {c2['false_alarms']:6d} {c2['hit_rate']:8.1%} "
                   f"{c2['false_alarm_share']:11.1%} {c2['frequency_bias']:5.2f}   "
                   f"[{c1['hit_rate']:.1%} / {c1['false_alarm_share']:.1%} / {c1['frequency_bias']:.2f}]")
@@ -206,7 +231,8 @@ def main() -> int:
                   f"[{d['event_days']['ci_lower']:+.4f}, {d['event_days']['ci_upper']:+.4f}]   "
                   f"non-event days {d['non_event_days']['mean']:+.4f} "
                   f"[{d['non_event_days']['ci_lower']:+.4f}, {d['non_event_days']['ci_upper']:+.4f}]")
-        print(f"  Brier, raw -> calibrated (week-out cross-validation):")
+        how = "fitted on --fit-cache, applied out of sample" if fit is not None else f"{args.cv}-out cross-validation"
+        print(f"  Brier, raw -> calibrated ({how}):")
         for l in labels:
             r = res["models"][l]
             mp = ", ".join(f"{k:.2f}->{v:.3f}" for k, v in sorted(r["calibration_map_all_data"].items()))
