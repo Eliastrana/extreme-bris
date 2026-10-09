@@ -97,7 +97,8 @@ def collect(plan: dict, specs: dict, observations: Path, meps_path: Path | None)
     period = plan["period"]
     cycles = ev.expected_cycles(period["start"], period["end"], int(period["cycle_hour_utc"]))
 
-    got = {lead: {"obs": [], "dates": [], "meps": [], "models": {l: [] for l in labels}} for lead in leads}
+    got = {lead: {"obs": [], "dates": [], "meps": [], "station": [], "models": {l: [] for l in labels}}
+           for lead in leads}
     for n, cycle in enumerate(cycles, 1):
         if not all(cycle in indexes[l] for l in labels) or (meps and not meps.has_cycle(cycle)):
             continue
@@ -115,17 +116,22 @@ def collect(plan: dict, specs: dict, observations: Path, meps_path: Path | None)
             slot["obs"].append(truth[common])
             slot["dates"].append(np.full(int(common.sum()), valid.astype("datetime64[D]")))
             slot["meps"].append(meps_daily[li][common])
+            slot["station"].append(np.flatnonzero(common))
             for l in labels:
                 slot["models"][l].append(daily[l][li][:, common].T)
         if n % 50 == 0:
             print(f"  {n}/{len(cycles)} cycles read", flush=True)
 
-    flat = {}
+    # Which gauge each case is, as an index into "stations", for scores that
+    # need the gauge's own climate (thresholds per station). Older caches
+    # lack both keys; nothing that reads them before this needs them.
+    flat = {"stations": np.asarray(obs["stations"])}
     for lead in leads:
         slot = got[lead]
         flat[f"obs_{lead}"] = np.concatenate(slot["obs"])
         flat[f"dates_{lead}"] = np.concatenate(slot["dates"])
         flat[f"meps_{lead}"] = np.concatenate(slot["meps"])
+        flat[f"station_{lead}"] = np.concatenate(slot["station"])
         for l in labels:
             flat[f"model_{l}_{lead}"] = np.concatenate(slot["models"][l])
     return flat
