@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-09",
+  "status": "FROZEN before C2 was trained and before any test-year forecast of C2 or F existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen, each with its reason, as in earlier plans.",
+  "title": "Does the calibration result replicate on a second training draw?",
+  "origin": "evaluation/calibration_test_plan.json passed: on the test year, calibrated tailC2000 minus calibrated control2000 at 20 mm was -0.00154 [-0.00218, -0.00100] (month-out calibration, 5000 replicates); the 16-member check kept the advantage at the same size. Both arms were trained once, on seed 20260909. F (control2000s2) showed that a new seed moves calibrated Brier by under 1 percent on the validation period, but F is one draw. This plan trains C's recipe on F's seed and scores the new pair the same way.",
+
+  "models": {
+    "tailC2000s2": "bris/train/finetune_tail_c_seed2.yaml (finetune_tail_c with base seed 20261003) at step 2000 of the 3 000-step schedule: ~/bris-models/tailC2000s2/tailC2000s2-step002000_inference.ckpt",
+    "control2000s2": "F, bris/train/finetune_seed2.yaml at step 2000, seed 20261003, already trained: ~/bris-models/control2000s2/control2000s2-step002000_inference.ckpt"
+  },
+  "comparison": "tailC2000s2 minus control2000s2",
+  "training": "one run, bris/slurm/finetune.sbatch finetune_tail_c_seed2, nothing changed but the seed. If the node fails, the run is restarted from the beginning with the same config; no other change is allowed.",
+
+  "test": {
+    "period": {"start": "2025-08-01", "end": "2026-09-06", "cycle_hour_utc": 0, "every_nth_day": 1},
+    "forecasts": "bris/slurm/bris_forecast.sbatch, 4 members, BRIS_LEADTIMES=7; 2025-08-01..2025-09-07 from the year2 datasets and 2025-09-08..2026-09-06 from year1, exactly as the calibration test, into ~/bris-runs/evaluation/<model>",
+    "lead_hours": 30,
+    "cases": "strict common cases of tailC2000s2, control2000s2 and MEPS at screened gauges (~/bris-runs/observations, quality code 4 or better, within 5 km)",
+    "event": "gauge 06-06 UTC total above the threshold",
+    "probability": "share of the 4 members above the threshold",
+    "scorer": "scripts/hits_and_calibration.py with the same arguments as the calibration test's primary run (--cv month --replicates 5000 --meps), with these two models and --comparator control2000s2"
+  },
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after isotonic calibration, leave-one-calendar-month-out, tailC2000s2 minus control2000s2",
+    "uncertainty": "paired block bootstrap, seven-day calendar blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "reading": {
+    "positive": "the calibration result holds on a second, independent training draw of both arms; together with the first pair, two of two draws",
+    "inconclusive": "reported as such, with both pairs' estimates side by side; not read as a failure to replicate unless the estimate is near zero",
+    "negative": "the first result depended on the draw; the thesis reports both"
+  },
+
+  "secondary_reported": [
+    "the same at 10 and 50 mm",
+    "the same under calibration fitted on the validation period (every second day 2025-04-01..2025-07-31) and applied unchanged to the test year: the fit cases are made by hits_and_calibration.py on the validation forecasts of these two models (--cache), then passed as --fit-cache",
+    "raw Brier, ROC area, hits and false alarms, twCRPS split into event and non-event days",
+    "both pairs together: on the strict common cases of all four models, the mean over the two pairs of (calibrated C minus calibrated control), with a paired seven-day block bootstrap over the summed per-case differences",
+    "the cross-seed comparisons tailC2000s2 minus control2000 and tailC2000 minus control2000s2, labelled as such, since they mix draws"
+  ],
+
+  "not_claimed": "Passing would show the result is not a property of one training draw, at 2000 steps, on the test year. It would not show the same for a full-length run or more years of data."
+}

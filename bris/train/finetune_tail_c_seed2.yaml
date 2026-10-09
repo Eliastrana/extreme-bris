@@ -1,0 +1,18 @@
+# tail-mm: none   (read by finetune.sbatch's threshold check)
+# base-seed: 20261003   (read by finetune.sbatch; F's seed, see finetune_seed2.yaml)
+# TAIL VARIANT C, SECOND DRAW: THE SAME RUN WITH F'S SEED.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_c_seed2
+#   scripts/diff_configs.py finetune_tail_c finetune_tail_c_seed2
+#
+# The calibration test (evaluation/calibration_test_plan.json) passed on one
+# training run per arm: tailC2000 against control2000, both on seed 20260909.
+# F, control2000s2, is the control recipe on seed 20261003. This is C's recipe
+# on the same seed, so C2 against F is a second, independent pair, scored by
+# evaluation/c2_replication_plan.json. Nothing but the seed differs from
+# finetune_tail_c, including the measured weight: it is the same recipe drawn
+# again, not a new variant, so the weight is not re-measured.
+
+defaults:
+- finetune_tail_c
+- _self_
