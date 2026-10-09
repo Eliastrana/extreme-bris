@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-09",
+  "status": "FROZEN before any test-year forecast of tailA2000, tailB2000, tailD2000, tailE2000 or tail2000 existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "Which part of the tail term carries the calibrated gain: the weight on precipitation, or the threshold?",
+  "origin": "evaluation/calibration_test_plan.json passed for variant C (no threshold): calibrated Brier at 20 mm, tailC2000 minus control2000, -0.00154 [-0.00218, -0.00100] on the test year. The original tail arm (hard threshold at 20 mm, full dose) showed no such gain at step 3000 (+1.3 percent, interval across zero). On the validation period, D (soft 5 mm) and E (no threshold, a third of C's dose) gained after calibration as C did. This plan scores every step-2000 variant on the test year by the same rule, to see whether the gain follows the threshold.",
+
+  "models": {
+    "control2000": "comparator, test-year forecasts already exist (~/bris-runs/evaluation/control2000)",
+    "tail2000": "original tail arm, hard threshold 20 mm, weight 13 716, step 2000: ~/bris-models/tail/tail-step002000_inference.ckpt",
+    "tailA2000": "hard threshold 20 mm, weight 1 371.6",
+    "tailB2000": "hard threshold 5 mm, weight 83.98",
+    "tailD2000": "soft threshold 5 mm (softness 2 mm), weight 76.55",
+    "tailE2000": "no threshold, weight 13.03 (a third of C's)",
+    "tailC2000": "no threshold, weight 39.09; already scored, repeated here for the table only"
+  },
+
+  "test": "exactly as evaluation/calibration_test_plan.json: 2025-08-01..2026-09-06, every day, 4 members, BRIS_LEADTIMES=7, +30 h daily totals, strict common cases of the variant, control2000 and MEPS, scripts/hits_and_calibration.py --cv month --replicates 5000 --meps, each variant scored as its own pair against control2000. Forecasts may be split into date chunks across jobs; the dates and datasets per day are unchanged.",
+
+  "endpoint_per_variant": {
+    "measure": "Brier score at 20 mm after month-out isotonic calibration, variant minus control2000",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "better_if": "upper 95 percent bound below 0",
+    "worse_if": "lower 95 percent bound above 0",
+    "otherwise": "no difference shown"
+  },
+
+  "registered_prediction": {
+    "hypothesis": "the calibrated gain comes from extra weight on precipitation below 20 mm; a hard 20 mm threshold, which gives the term nothing to say about days below it, carries none",
+    "tailD2000": "better",
+    "tailE2000": "better",
+    "tailB2000": "better or no difference: its hard threshold is at 5 mm, so the term still acts on most heavy-rain days",
+    "tailA2000": "no difference",
+    "tail2000": "no difference or worse",
+    "supported_if": "D and E better, and neither A nor tail2000 better",
+    "contradicted_if": "A or tail2000 better, or D and E both not better"
+  },
+
+  "secondary_reported": [
+    "the same at 10 and 50 mm",
+    "raw Brier, ROC area, hits and false alarms per variant",
+    "dose within no-threshold arms: E (a third of the dose) against C, read from their separate differences against control2000, not tested",
+    "scripts/station_extremes.py per variant against control2000 (exploratory, as that script is)"
+  ],
+
+  "not_claimed": "Seven comparisons on one test year, one training draw each, at step 2000. Read as a pattern across variants, not as seven independent findings."
+}
