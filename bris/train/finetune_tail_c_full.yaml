@@ -1,0 +1,20 @@
+# tail-mm: none   (read by finetune.sbatch's threshold check)
+# PAVO (VARIANT C) OVER THE WHOLE SCHEDULE: 3 000 STEPS INSTEAD OF 2 000.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_c_full
+#   scripts/diff_configs.py finetune_tail_c finetune_tail_c_full
+#
+# Every Pavo result so far is at step 2000 of a 3 000-step cosine schedule,
+# the screening length. The control arm and the original tail arm were run to
+# the end; this runs Pavo's recipe to the end too, so it can be scored against
+# control (step 3000) on the test year: does the calibrated gain survive, grow
+# or fade with the rest of the schedule? Scored by
+# evaluation/pavo_full_schedule_plan.json. Nothing else differs from
+# finetune_tail_c, seed included.
+
+defaults:
+- finetune_tail_c
+- _self_
+
+training:
+  max_steps: 3000

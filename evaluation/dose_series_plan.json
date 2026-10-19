@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-19",
+  "status": "FROZEN before tail30th2000 or tail3rd2000 was trained. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "With a hard 20 mm threshold, does the calibrated gain depend on the dose?",
+  "origin": "evaluation/variants_testyear_plan.json registered that a hard 20 mm threshold would carry no calibrated gain. It was contradicted: tailA2000 (hard 20 mm, weight 1 371.6, a tenth of the original) gained -0.00133 [-0.00194, -0.00083] at 20 mm against control2000, while tail2000 (the same term at the full weight 13 716) gained -0.00014 [-0.00082, +0.00048]. The two differ only in weight. This plan adds two doses to the series, on a log scale, and states in advance what a dose effect should look like.",
+
+  "models": {
+    "tail30th2000": "bris/train/finetune_tail_a30.yaml: hard threshold 20 mm, weight 457.2 (1/30 of 13 716), step 2000 of the 3 000-step schedule, seed 20260909",
+    "tail3rd2000": "bris/train/finetune_tail_a3.yaml: hard threshold 20 mm, weight 4 572 (1/3), step 2000, seed 20260909",
+    "already_scored": "tailA2000 (1/10) and tail2000 (1) on the test year, ~/bris-runs/variants-testyear",
+    "comparator": "control2000"
+  },
+  "training": "one run each, bris/slurm/finetune.sbatch, nothing changed but the weight. A run lost to the node is restarted from the beginning, unchanged.",
+
+  "test": "exactly as evaluation/variants_testyear_plan.json: 2025-08-01..2026-09-06, 4 members, BRIS_LEADTIMES=7, +30 h, strict common cases of the arm, control2000 and MEPS, scripts/hits_and_calibration.py --cv month --replicates 5000 --meps, each arm as its own pair against control2000",
+
+  "endpoint_per_arm": {
+    "measure": "Brier score at 20 mm after month-out isotonic calibration, arm minus control2000",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "better_if": "upper 95 percent bound below 0",
+    "worse_if": "lower 95 percent bound above 0",
+    "otherwise": "no difference shown"
+  },
+
+  "registered_prediction": {
+    "hypothesis": "the gain falls with dose: present at small and moderate weights, gone at the full weight",
+    "tail30th2000": "better",
+    "tail3rd2000": "a mean difference closer to zero than tailA2000's -0.00133",
+    "supported_if": "tail30th2000 better, and tail3rd2000's mean difference above -0.00133",
+    "contradicted_if": "tail30th2000 not better, or tail3rd2000's mean difference at or below -0.00133"
+  },
+
+  "secondary_reported": [
+    "the four-point series 1/30, 1/10, 1/3, 1 at 10, 20 and 50 mm, with raw Brier, ROC area and frequency bias, as a figure against log dose",
+    "tail3rd2000 minus tailA2000, calibrated, at 20 mm, on their common cases (paired bootstrap)",
+    "scripts/station_extremes.py per arm against control2000 (exploratory)"
+  ],
+
+  "not_claimed": "One draw per dose, at step 2000, one threshold. A dose curve for the hard threshold only; the arms without a threshold are not part of it."
+}

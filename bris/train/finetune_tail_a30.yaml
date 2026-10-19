@@ -1,0 +1,22 @@
+# tail-mm: 20   (read by finetune.sbatch's threshold check)
+# DOSE SERIES, HARD 20 MM THRESHOLD: A THIRTIETH OF THE ORIGINAL TAIL ARM'S DOSE.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_a30
+#   scripts/diff_configs.py finetune_tail_a finetune_tail_a30
+#
+# On the test year A (a tenth of the dose) gained after calibration as much
+# as the arms without a threshold, while tail2000 (the full dose, 13 716)
+# gained nothing (evaluation/variants_testyear_plan.json, contradicting its
+# registered prediction). A and tail2000 differ only in weight, so the dose,
+# not the threshold, is the candidate. This arm and finetune_tail_a3 fill in
+# the series on a log scale: 1/30, 1/10 (A), 1/3, 1 (tail2000).
+# Scored by evaluation/dose_series_plan.json. Same measured weight as the
+# tail arm, scaled; nothing else differs from finetune_tail_a.
+
+defaults:
+- finetune_tail_a
+- _self_
+
+training:
+  training_loss:
+    loss_weights: [1.0, 457.2]

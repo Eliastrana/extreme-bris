@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-19",
+  "status": "FROZEN before tailC3000 was trained. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "Does Pavo's calibrated gain hold over the whole schedule?",
+  "origin": "Pavo (variant C) beat the control arm after calibration at step 2000 on two independent training draws (evaluation/calibration_test_plan.json and evaluation/c2_replication_plan.json, -0.00154 and -0.00143 at 20 mm). Step 2000 is where screening stopped, two thirds of the 3 000-step cosine schedule. The control arm was run to step 3000 and has test-year forecasts. This plan runs Pavo's recipe to the end and scores it against that control.",
+
+  "models": {
+    "tailC3000": "bris/train/finetune_tail_c_full.yaml: finetune_tail_c with max_steps 3000, seed 20260909, step 3000",
+    "control3000": "the control arm at step 3000, seed 20260909: ~/bris-models/control/control-step003000_inference.ckpt, test-year forecasts in ~/bris-runs/evaluation/control"
+  },
+  "comparison": "tailC3000 minus control3000",
+
+  "test": "exactly as evaluation/calibration_test_plan.json: 2025-08-01..2026-09-06, 4 members, BRIS_LEADTIMES=7, +30 h, strict common cases of both and MEPS, scripts/hits_and_calibration.py --cv month --replicates 5000 --meps --comparator control3000",
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm after month-out isotonic calibration, tailC3000 minus control3000",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "secondary_reported": [
+    "the same at 10 and 50 mm; raw Brier, ROC area, hits and false alarms",
+    "tailC3000 minus tailC2000 and control3000 minus control2000, calibrated, at 20 mm: what the last third of the schedule does to each recipe",
+    "scripts/station_extremes.py, tailC3000 against control3000 (exploratory)"
+  ],
+
+  "not_claimed": "A longer schedule on the same 18 months of data, one draw. Not more data; that needs new datasets."
+}
