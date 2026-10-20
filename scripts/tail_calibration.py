@@ -92,7 +92,8 @@ def collect(plan: dict, specs: dict, observations: Path, meps_path: Path | None)
     leads = [int(v) for v in plan["leads_hours"]]
     dist = float(op["max_distance_km"])
     indexes = {l: ev.index_model_files(specs[l]) for l in labels}
-    readers = {l: ev.BrisReader(obs, dist, plan["forecast_accumulation"]) for l in labels}
+    interpolation = op.get("interpolation", "nearest")
+    readers = {l: ev.BrisReader(obs, dist, plan["forecast_accumulation"], interpolation) for l in labels}
     meps = ev.MepsReader(meps_path, obs, dist) if meps_path else None
     period = plan["period"]
     cycles = ev.expected_cycles(period["start"], period["end"], int(period["cycle_hour_utc"]))

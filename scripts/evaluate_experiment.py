@@ -117,17 +117,65 @@ def member_dimension(da: xr.DataArray) -> str | None:
     return None
 
 
-class BrisReader:
-    """Read only gauge cells from one model's gridded forecast files."""
+def bilinear_corners(ds: xr.Dataset, lat: np.ndarray, lon: np.ndarray, path: Path):
+    """The four cells around each point and their bilinear weights, in grid projection.
 
-    def __init__(self, obs: dict, max_distance_km: float, accumulation: str) -> None:
+    A point at fraction a along x and b along y of its cell gets
+    (1-a)(1-b), a(1-b), (1-a)b and ab on its four corners; the weights sum to
+    one, and a point on a cell centre gets that cell alone. Points beyond the
+    outermost centres are clamped to the edge, which only matters within half
+    a cell of the domain boundary.
+    """
+    import pyproj
+
+    if "projection" not in ds or "x" not in ds.coords or "y" not in ds.coords:
+        raise ValueError(f"{path.name}: bilinear needs a CF projection and 1-D x/y coordinates")
+    x = np.asarray(ds["x"].values, dtype="float64")
+    y = np.asarray(ds["y"].values, dtype="float64")
+    if x.ndim != 1 or y.ndim != 1 or np.any(np.diff(x) <= 0) or np.any(np.diff(y) <= 0):
+        raise ValueError(f"{path.name}: x and y must be increasing 1-D coordinates")
+    crs = pyproj.CRS.from_cf(dict(ds["projection"].attrs))
+    to_grid = pyproj.Transformer.from_crs("EPSG:4326", crs, always_xy=True)
+    px, py = to_grid.transform(np.asarray(lon, dtype="float64"), np.asarray(lat, dtype="float64"))
+    i = np.clip(np.searchsorted(x, px) - 1, 0, x.size - 2)
+    j = np.clip(np.searchsorted(y, py) - 1, 0, y.size - 2)
+    a = np.clip((px - x[i]) / (x[i + 1] - x[i]), 0.0, 1.0)
+    b = np.clip((py - y[j]) / (y[j + 1] - y[j]), 0.0, 1.0)
+    return [
+        (j, i, (1 - a) * (1 - b)),
+        (j, i + 1, a * (1 - b)),
+        (j + 1, i, (1 - a) * b),
+        (j + 1, i + 1, a * b),
+    ]
+
+
+class BrisReader:
+    """Read only gauge cells from one model's gridded forecast files.
+
+    INTERPOLATION. "nearest" takes the cell closest to the gauge, as every
+    score in the project so far has. "bilinear" weights the four cells around
+    the gauge by how close it lies to each, which is how bris-inference's own
+    point verification does it (gridpp.bilinear). The gauges kept are the same
+    either way, those within max_distance_km of a cell, so the two give scores
+    on exactly the same cases. Bilinear works in the grid's own projection,
+    read from its CF "projection" variable, where the cells are a regular
+    2.5 km lattice; interpolating in latitude and longitude would not be.
+    """
+
+    def __init__(self, obs: dict, max_distance_km: float, accumulation: str,
+                 interpolation: str = "nearest") -> None:
+        if interpolation not in ("nearest", "bilinear"):
+            raise ValueError(f"unknown interpolation {interpolation!r}")
         self.obs = obs
         self.max_distance_km = max_distance_km
         self.accumulation = accumulation
+        self.interpolation = interpolation
         self._row: np.ndarray | None = None
         self._col: np.ndarray | None = None
         self._keep: np.ndarray | None = None
         self._shape: tuple[int, int] | None = None
+        # bilinear: four (rows, cols, weights) triples, one per corner
+        self._corners: list[tuple[np.ndarray, np.ndarray, np.ndarray]] | None = None
 
     def _match_grid(self, ds: xr.Dataset, path: Path) -> None:
         latitude = np.asarray(ds["latitude"].values, dtype="float64")
@@ -140,6 +188,10 @@ class BrisReader:
         self._keep = distance <= self.max_distance_km
         self._row, self._col = np.divmod(idx[self._keep], latitude.shape[1])
         self._shape = latitude.shape
+        if self.interpolation == "bilinear":
+            self._corners = bilinear_corners(
+                ds, self.obs["lat"][self._keep], self.obs["lon"][self._keep], path
+            )
 
     def read(self, path: Path, end_leads: list[int]) -> tuple[np.ndarray, dict]:
         with xr.open_dataset(path) as ds:
@@ -176,7 +228,13 @@ class BrisReader:
             # identical values. The scattered read put a full evaluation at
             # about a day.
             field = np.asarray(da.transpose("time", member, "y", "x").values)
-            steps = field[:, :, self._row, self._col].astype("float64")
+            if self._corners is None:
+                steps = field[:, :, self._row, self._col].astype("float64")
+            else:
+                steps = sum(
+                    weight * field[:, :, rows, cols].astype("float64")
+                    for rows, cols, weight in self._corners
+                )
             times = np.asarray(ds["time"].values).astype("datetime64[s]")
             attrs = {
                 key: str(value)

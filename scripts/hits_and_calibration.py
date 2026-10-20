@@ -132,6 +132,9 @@ def main() -> int:
     ap.add_argument("--fit-cache", type=Path, default=None,
                     help="cases from another period (a --cache file of this script) to fit the calibration on instead; "
                          "the fitted maps are applied to these cases, which are then fully out of sample")
+    ap.add_argument("--interpolation", choices=["nearest", "bilinear"], default="nearest",
+                    help="model value at a gauge: the nearest cell, or bilinear over the four around it "
+                         "(as bris-inference's point verification); the gauges kept are the same")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
@@ -141,17 +144,24 @@ def main() -> int:
         raise SystemExit(f"comparator {args.comparator} is not among the models")
     plan = {"required_models": labels, "leads_hours": [LEAD], "forecast_accumulation": "per_step",
             "period": {"start": args.start, "end": args.end, "cycle_hour_utc": 0},
-            "observations": {"max_quality": 4, "max_distance_km": 5.0}}
+            "observations": {"max_quality": 4, "max_distance_km": 5.0,
+                             "interpolation": args.interpolation}}
     cache = args.cache.expanduser() if args.cache else None
     if cache and cache.exists():
         with np.load(cache, allow_pickle=False) as data:
             cases = {k: data[k] for k in data.files}
+        # Caches from before the option are nearest-cell ones.
+        cached = str(cases.pop("interpolation", "nearest"))
+        if cached != args.interpolation:
+            raise SystemExit(f"{cache} holds {cached} cases, not {args.interpolation}; use another --cache")
     else:
         cases = tc.collect(plan, specs, args.observations.expanduser(),
                            args.meps.expanduser() if args.meps else None)
+        cases["interpolation"] = np.array(args.interpolation)
         if cache:
             cache.parent.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(cache, **cases)
+        cases.pop("interpolation")
 
     o = cases[f"obs_{LEAD}"]
     dates = cases[f"dates_{LEAD}"].astype("datetime64[D]")
@@ -167,7 +177,8 @@ def main() -> int:
     m = ens[labels[0]].shape[1]
     report = {"exploratory": True, "lead_hours": LEAD, "station_days": int(o.size), "members": int(m),
               "calibration": ({"fitted_on": str(args.fit_cache)} if fit is not None else {"cross_validation": args.cv}),
-              "meps_in_common_cases": bool(args.meps), "thresholds": {}}
+              "meps_in_common_cases": bool(args.meps), "interpolation": args.interpolation,
+              "thresholds": {}}
     print(f"{o.size:,} station-days, {m} members, +{LEAD} h, comparator {args.comparator}")
 
     for t in THRESHOLDS:
