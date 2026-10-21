@@ -186,6 +186,7 @@ def main() -> int:
         res = {"events": int(event.sum()), "models": {}}
         tw = {l: threshold_weighted_crps_cases(ens[l], o, t) for l in labels}
         cal_cases = {}
+        raw_cases = {}
         for l in labels:
             p = (ens[l] > t).mean(axis=1)
             if fit is None:
@@ -196,6 +197,7 @@ def main() -> int:
                 known = np.array(sorted(mapping))
                 cal = np.array([mapping[float(known[np.argmin(np.abs(known - v))])] for v in p])
             cal_cases[l] = (cal - event) ** 2
+            raw_cases[l] = (p - event) ** 2
             res["models"][l] = {
                 "contingency": {f"at_least_{int(np.ceil(f * m))}_of_{m}": contingency(ens[l], o, t, int(np.ceil(f * m)))
                                 for f in YES_SHARES},
@@ -219,6 +221,10 @@ def main() -> int:
             bt = paired_block_bootstrap(cal_cases[l] - cal_cases[args.comparator], dates, block_days=7,
                                         replicates=args.replicates)
             res["models"][l]["calibrated_brier_minus_comparator"] = {
+                "mean": bt["mean_difference"], "ci_lower": bt["ci_lower"], "ci_upper": bt["ci_upper"]}
+            bt = paired_block_bootstrap(raw_cases[l] - raw_cases[args.comparator], dates, block_days=7,
+                                        replicates=args.replicates)
+            res["models"][l]["raw_brier_minus_comparator"] = {
                 "mean": bt["mean_difference"], "ci_lower": bt["ci_lower"], "ci_upper": bt["ci_upper"]}
         report["thresholds"][f"{t:g}"] = res
 
@@ -254,6 +260,9 @@ def main() -> int:
                 continue
             d = res["models"][l]["calibrated_brier_minus_comparator"]
             print(f"    calibrated {l} - calibrated {args.comparator}: {d['mean']:+.5f} "
+                  f"[{d['ci_lower']:+.5f}, {d['ci_upper']:+.5f}]")
+            d = res["models"][l]["raw_brier_minus_comparator"]
+            print(f"    raw {l} - raw {args.comparator}:               {d['mean']:+.5f} "
                   f"[{d['ci_lower']:+.5f}, {d['ci_upper']:+.5f}]")
 
     args.out.expanduser().parent.mkdir(parents=True, exist_ok=True)
