@@ -1,0 +1,17 @@
+# tail-mm: 20   (read by finetune.sbatch's threshold check)
+# base-seed: 20261003   (read by finetune.sbatch; F's seed, see finetune_seed2.yaml)
+# TAIL VARIANT A, SECOND DRAW: THE SAME RUN WITH F'S SEED.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_a_seed2
+#   scripts/diff_configs.py finetune_tail_a finetune_tail_a_seed2
+#
+# A (hard 20 mm threshold, a tenth of the original weight) came out as the
+# best all-round model on the test year: better than the control arm on heavy
+# rain both raw and calibrated, with the right mean precipitation. It was
+# trained once. This is A's recipe on F's seed, so A2 against F is a second,
+# independent pair, scored by evaluation/a_replication_plan.json exactly as
+# C2 was. Nothing but the seed differs from finetune_tail_a.
+
+defaults:
+- finetune_tail_a
+- _self_

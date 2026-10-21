@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-21",
+  "status": "FROZEN before A2 was trained and before any forecast of it existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "Does variant A's result replicate on a second training draw?",
+  "origin": "On the test year tailA2000 (hard 20 mm threshold, weight 1 371.6) beat control2000 at 20 mm after calibration, -0.00133 [-0.00194, -0.00083], and was the only variant also better raw (Brier 0.02163 against 0.02250), with mean precipitation at 1.00 of observed. The dose series (evaluation/dose_series_plan.json) put it at the top of the curve. It was trained once, on seed 20260909. This plan trains A's recipe on F's seed and scores it against F, as evaluation/c2_replication_plan.json did for Pavo.",
+
+  "models": {
+    "tailA2000s2": "bris/train/finetune_tail_a_seed2.yaml (finetune_tail_a with base seed 20261003) at step 2000: ~/bris-models/tailA2000s2/tailA2000s2-step002000_inference.ckpt",
+    "control2000s2": "F, already trained and forecast for the test year"
+  },
+  "comparison": "tailA2000s2 minus control2000s2",
+  "training": "one run, bris/slurm/finetune.sbatch finetune_tail_a_seed2. A run lost to the node is restarted from the beginning, unchanged.",
+
+  "test": "exactly as evaluation/c2_replication_plan.json: 2025-08-01..2026-09-06, 4 members, BRIS_LEADTIMES=7, +30 h, strict common cases of the pair and MEPS, scripts/hits_and_calibration.py --cv month --replicates 5000 --meps --comparator control2000s2. Forecasts may be split into date chunks; a final pass fills any day a chunk lost to the cluster.",
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after month-out isotonic calibration, tailA2000s2 minus control2000s2",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "secondary_reported": [
+    "raw (uncalibrated) Brier at 20 mm against F, the property that set A apart; reported with its sign, and with a paired block bootstrap computed the same way as the primary",
+    "the same at 10 and 50 mm; ROC area; frequency bias",
+    "mean precipitation over all station-days relative to observed, and fair CRPS of daily precipitation over all station-days against F with a seven-day block bootstrap",
+    "2 m temperature and 10 m wind against Frost observations with scripts/general_skill.py, against F (exploratory, as that script is)"
+  ],
+
+  "not_claimed": "Passing would show A's calibrated gain is not a property of one training draw, at step 2000, on the test year. It would not settle A against Pavo; that comparison is reported separately and is exploratory."
+}
