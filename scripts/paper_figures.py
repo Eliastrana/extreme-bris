@@ -67,12 +67,25 @@ VARS = {
 BSS_THRESHOLDS = {"precipitation": [0.5, 1, 2, 5, 10, 15, 20], "wind": [5, 8, 10, 12, 15, 18]}
 QQ_LEADS = (24, 36)
 QQ_PROBS = [0.5, 0.75, 0.9, 0.95, 0.98, 0.99, 0.995, 0.998, 0.999]
+# THE HOURLY PRECIPITATION HAS NO QUALITY CODES, AND IT NEEDS SOME. The first
+# run found hourly values up to 177 mm, 640 hours over 50 mm and 854 negative
+# ones, which made 6 h sums of up to 945 mm against forecasts under 1 mm and
+# put every model's RMSE at 5.6 mm (1.9 without them). An hour outside
+# [0, HOURLY_MAX_MM] is treated as missing, so its 6 h sum is dropped. 50 mm in
+# one hour is near the Norwegian record; the daily scores elsewhere use Frost's
+# own quality codes and are unaffected.
+HOURLY_MAX_MM = 50.0
 
 
 def load_obs(obs_dir: Path, name: str) -> dict:
     with np.load(obs_dir / f"{name}.npz", allow_pickle=False) as f:
         times = np.array([t[:19] for t in f["times"]], dtype="datetime64[h]")
-        return {"values": f["values"].astype("float64"), "lat": f["lat"], "lon": f["lon"],
+        values = f["values"].astype("float64")
+        if name == "precipitation":
+            bad = (values < 0) | (values > HOURLY_MAX_MM)
+            print(f"  precipitation QC: {int(bad.sum()):,} hourly values outside [0, {HOURLY_MAX_MM:g}] mm set missing")
+            values[bad] = np.nan
+        return {"values": values, "lat": f["lat"], "lon": f["lon"],
                 "stations": f["stations"], "times": times, "index": {t: i for i, t in enumerate(times)}}
 
 
@@ -214,6 +227,22 @@ def combine(args: argparse.Namespace) -> int:
                 aligned[lab]["obs"] = s["obs"][p]
         obs = aligned[ref]["obs"]
         lead = aligned[ref]["lead"]
+        if n == "precipitation":
+            # Recomputed from the QC'd hourly values, so caches collected
+            # before the QC need not be read again.
+            o = obs_dirs[n]
+            valid = (aligned[ref]["init"].astype("datetime64[h]") + lead.astype("timedelta64[h]"))
+            tix = np.array([o["index"].get(v, -1) for v in valid])
+            fresh = np.full(obs.shape, np.nan)
+            okt = tix >= 5
+            st = aligned[ref]["station"][okt]
+            blocks = np.stack([o["values"][st, tix[okt] - k] for k in range(6)], axis=1)
+            fresh[okt] = np.where(np.isfinite(blocks).all(axis=1), blocks.sum(axis=1), np.nan)
+            keep = np.isfinite(fresh)
+            print(f"  precipitation: {int((~keep).sum()):,} of {keep.size:,} cases dropped by QC")
+            aligned = {lab: {k: v[keep] for k, v in a.items()} for lab, a in aligned.items()}
+            obs, lead = fresh[keep], lead[keep]
+            common = common[keep]
         res = {"cases": int(common.size), "stations": int(np.unique(aligned[ref]["station"]).size), "models": {}}
         print(f"\n===== {n}: {common.size:,} common cases, {res['stations']} stations")
         for lab, a in aligned.items():
