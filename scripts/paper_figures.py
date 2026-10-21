@@ -251,14 +251,18 @@ def combine(args: argparse.Namespace) -> int:
             c = fair_crps(e, obs)
             mean = e.mean(axis=1)
             var = e.var(axis=1, ddof=1) if m > 1 else np.zeros_like(mean)
-            entry = {"members": int(m), "crps": {}, "rmse": {}, "spread": {}}
+            entry = {"members": int(m), "crps": {}, "rmse": {}, "spread": {}, "mean": {}}
             for L in LEADS:
                 s = lead == L
+                entry["mean"][L] = float(mean[s].mean())
                 entry["crps"][L] = float(c[s].mean())
                 entry["rmse"][L] = float(np.sqrt(((mean[s] - obs[s]) ** 2).mean()))
                 entry["spread"][L] = float(np.sqrt(var[s].mean() * (m + 1) / m)) if m > 1 else None
             if n in BSS_THRESHOLDS:
                 entry["bss"] = {}
+                # How often the model says the threshold is passed (mean share
+                # of members over it), to set against how often it was.
+                entry["freq"] = {t: float((e > t).mean()) for t in BSS_THRESHOLDS[n]}
                 for t in BSS_THRESHOLDS[n]:
                     ev_ = (obs > t).astype(float)
                     clim = ev_.mean()
@@ -270,6 +274,9 @@ def combine(args: argparse.Namespace) -> int:
                 entry["qq"] = {"probs": QQ_PROBS, "forecast": [float(np.quantile(e[s].ravel(), q)) for q in QQ_PROBS]}
             res["models"][lab] = entry
             print(f"  {lab:14s} m={m:2d}  CRPS " + " ".join(f"{entry['crps'][L]:.3f}" for L in LEADS))
+        res["observed_mean"] = {L: float(obs[lead == L].mean()) for L in LEADS}
+        if n in BSS_THRESHOLDS:
+            res["observed_freq"] = {t: float((obs > t).mean()) for t in BSS_THRESHOLDS[n]}
         if n in ("precipitation", "wind"):
             s = (lead >= QQ_LEADS[0]) & (lead <= QQ_LEADS[1])
             res["qq_observed"] = [float(np.quantile(obs[s], q)) for q in QQ_PROBS]
