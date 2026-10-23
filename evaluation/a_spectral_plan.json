@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-23",
+  "status": "FROZEN before tailAfft2000 was trained and before any forecast of it existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "Does A keep its heavy-rain gain with Bris's spectral loss term restored?",
+  "origin": "Every fine-tuning here trained without the second term of Bris's own loss, the almost-fair kernel CRPS on the Fourier coefficients of the MEPS fields, because anemoi 0.5.1 has no such class. scripts/spectra.py (exploratory) measured the cost: the control arm has 3-4 times the analysis' small-scale precipitation variance, and A 1.5-1.8 times it in 10 m wind. xbris/spectral.py ports the term from the code the checkpoint metadata records (evenmn/anemoi-core f6f4a82, AFCRPSFFTLoss) and scripts/test_spectral_loss.py checks it bit for bit against that code. This plan trains A's recipe with the term added at Bris's weight of 0.1.",
+
+  "models": {
+    "tailAfft2000": "bris/train/finetune_tail_a_spectral.yaml: finetune_tail_a plus xbris.spectral.SpectralAlmostFairKernelCRPS (xdim 849, ydim 969, alpha 0.95), loss_weights [1.0, 0.1, 1371.6], seed 20260909, step 2000: ~/bris-models/tailAfft2000/tailAfft2000-step002000_inference.ckpt",
+    "control2000": "the control arm at step 2000, seed 20260909, already forecast for the test year",
+    "tailA2000": "A, seed 20260909, already forecast for the test year"
+  },
+  "comparison": "tailAfft2000 minus control2000",
+  "training": "one run, bris/slurm/finetune.sbatch finetune_tail_a_spectral. A run lost to the node is restarted from the beginning, unchanged. A run that does not fit in memory is reported as such and not altered to fit without an amendment made before any result is seen.",
+
+  "test": "exactly as evaluation/a_replication_plan.json: 2025-08-01..2026-09-06, 4 members, BRIS_LEADTIMES=7, +30 h, strict common cases of the models and MEPS, scripts/hits_and_calibration.py --cv month --replicates 5000 --meps --comparator control2000. Forecasts may be split into date chunks; a final pass fills any day a job lost to the cluster.",
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after month-out isotonic calibration, tailAfft2000 minus control2000",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "registered_expectation": "scripts/spectra.py, every 12th day, +6 h and +36 h: tailAfft2000's 10 m wind variance relative to the MEPS analysis in the 5-10 and 10-20 km bands is closer to 1 than tailA2000's. Reported whichever way it goes; this is the reason the run exists, but it is exploratory, as that script is.",
+
+  "secondary_reported": [
+    "raw (uncalibrated) Brier at 20 mm against control2000, with its sign and a paired block bootstrap",
+    "tailAfft2000 minus tailA2000, calibrated and raw, at 20 mm: what the spectral term does to A (exploratory)",
+    "the same at 10 and 50 mm; ROC area; frequency bias",
+    "mean precipitation over all station-days relative to observed (scripts/precip_overall.py)",
+    "2 m temperature and 10 m wind against Frost observations with scripts/general_skill.py, against control2000 (exploratory)",
+    "the full spectra.py table for wind, temperature and precipitation, tailAfft2000 against tailA2000 and control2000"
+  ],
+
+  "not_claimed": "One draw, one dose. The control arm was not retrained with the spectral term, so tailAfft2000 against control2000 carries two differences (the tail term and the spectral term), and tailAfft2000 against tailA2000 is the one-difference comparison, reported as exploratory. The tail weight was measured against the main term alone and is kept unchanged on purpose, so with a third term in the sum the tail term is a smaller share of the total loss."
+}

@@ -1,0 +1,64 @@
+# tail-mm: 20   (read by finetune.sbatch's threshold check)
+# VARIANT A WITH BRIS'S SPECTRAL TERM RESTORED.
+#
+#   scripts/test_spectral_loss.py
+#   scripts/diff_configs.py finetune_tail_a finetune_tail_a_spectral
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_a_spectral
+#
+# Every fine-tuning so far dropped the second term of Bris's own loss, the
+# almost-fair kernel CRPS on the Fourier coefficients of the MEPS fields,
+# because anemoi 0.5.1 has no such class (finetune.yaml says why). The cost
+# showed in scripts/spectra.py: too much small-scale variance, three to four
+# times the analysis' in the control arm's precipitation and 1.5 to 1.8 times
+# it in A's wind. Station scores cannot see that, and the fields are what a
+# forecaster looks at. xbris/spectral.py is the term as the checkpoint
+# metadata records it, ported from the commit Bris was trained with and
+# checked against it to the bit.
+#
+# This is A and nothing else, plus that term at Bris's own weight of a tenth.
+# Same seed, same steps, same threshold and tail weight. The diff against
+# finetune_tail_a should show the losses list growing by one entry and
+# loss_weights growing by one number, and nothing more.
+#
+# ONE THING THAT DOES CHANGE WITHOUT BEING ASKED. The tail weight was measured
+# against the main term alone. With a third term in the sum the tail term is
+# a smaller share of the total loss, even though its ratio to the main term is
+# unchanged. Keeping 1 371.6 is deliberate: this asks what restoring Bris's
+# loss does to A as A was, not what a retuned A would do.
+
+defaults:
+- finetune_tail_a
+- _self_
+
+training:
+  training_loss:
+    losses:
+        # --- identical to finetune_tail.yaml ------------------------------
+        - _target_: anemoi.training.losses.AlmostFairKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+
+        # --- the one addition: Bris's spectral term -----------------------
+        # As in the checkpoint's metadata: AFCRPSFFTLoss, xdim 849, ydim 969,
+        # alpha 0.95, these three scalers and no node weights (the term lives
+        # on Fourier coefficients, not on grid points; nan_mask_weights is
+        # (1, 1) here, since the data has no imputer, and is what satisfies
+        # anemoi's demand for a scaler on the grid dimension).
+        - _target_: xbris.spectral.SpectralAlmostFairKernelCRPS
+          xdim: 849
+          ydim: 969
+          alpha: 0.95
+          chunk_variables: 8
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
+
+        # --- identical to finetune_tail.yaml ------------------------------
+        - _target_: xbris.losses.TailWeightedKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'lam_node_weights']
+          tail_threshold: 8.44074
+          tail_variable: tp
+          tail_index: 38
+          tail_scale: 1.0
+
+    # Bris's [1.0, 0.1], then A's tail weight.
+    loss_weights: [1.0, 0.1, 1371.6]
