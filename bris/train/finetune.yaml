@@ -270,6 +270,13 @@ training:
   # rather than one, and that has to be said out loud when the numbers are
   # reported. It can also be measured: compare the spatial spectrum of a
   # fine-tuned forecast against the baseline's rather than assuming it is small.
+  #
+  # Later (2026-10-23): the checkpoint's own metadata names the class Bris was
+  # trained with (AFCRPSFFTLoss, not the CRPSFFTLoss the published config says)
+  # and the commit it came from, so it no longer has to be guessed.
+  # xbris/spectral.py ports it, checked against that code by
+  # scripts/test_spectral_loss.py; finetune_tail_a_spectral.yaml uses it. This
+  # arm and the others stay as they were trained.
   training_loss:
     _target_: anemoi.training.losses.combined.CombinedLoss
     losses:
