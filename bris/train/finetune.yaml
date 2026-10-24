@@ -277,6 +277,18 @@ training:
   # xbris/spectral.py ports it, checked against that code by
   # scripts/test_spectral_loss.py; finetune_tail_a_spectral.yaml uses it. This
   # arm and the others stay as they were trained.
+  # THE alpha WRITTEN BELOW IS NOT THE alpha THAT RUNS (found 2026-10-24).
+  # anemoi's own default training_loss carries a top-level alpha: 1.0, and
+  # the merge keeps it on this CombinedLoss. CombinedLoss passes its kwargs to
+  # get_loss_function, which calls hydra's instantiate(loss_config, **kwargs),
+  # and kwargs override the config. So every term below, in every arm, runs
+  # with alpha 1.0, the fully fair CRPS, whatever its own line says. The
+  # spectral term's start-up log is what showed it ("alpha 1"). Bris's own
+  # pretraining did the same: its metadata has the same top-level alpha 1.0
+  # and the fork's CombinedLoss at f6f4a82 passes kwargs in the same way. So
+  # the runs match what Bris was actually trained with, and every comparison
+  # between arms is like for like; the 0.95 lines are left as they were so
+  # the configs still diff cleanly against the ones the runs used.
   training_loss:
     _target_: anemoi.training.losses.combined.CombinedLoss
     losses:

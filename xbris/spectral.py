@@ -41,6 +41,10 @@ by line, with three changes that do not touch the arithmetic:
     torch.fft has no bfloat16, so on float32 inputs this is a no-op and on
     anything else the original would have raised.
 
+ALPHA. The config's alpha 0.95 is overridden to 1.0 by the CombinedLoss
+kwargs, here as in every other term and in Bris's own training; see the note
+above training_loss in bris/train/finetune.yaml.
+
 The low-pass mask is the one at that commit: a hard circle, radial frequency
 below 0.5 cycles per grid length kept and the corners of the FFT square
 dropped. Later commits on the branch tapered it linearly and then removed it;
