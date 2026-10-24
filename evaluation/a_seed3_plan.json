@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-24",
+  "status": "FROZEN before A3 was trained and before any forecast of it existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "A third draw of variant A: how far a single draw wanders, and whether pooling draws repeats its bonus",
+  "origin": "A (seed 20260909) gave -0.00133 (-6.1 %) and A2 (seed 20261003, evaluation/a_replication_plan.json) -0.00055 (-2.6 %) in calibrated Brier at 20 mm against the control arm on the same seed. Pooled into eight-member ensembles (scripts/pool_seeds.py, exploratory), A + A2 gave -0.00181 (-8.4 %) against control2000 + F, more than either draw, while the same pooling moved the control arms by about -0.7 % and Pavo by about -1.4 %. One explanation is that the hard-threshold term fires on few states, so each draw learns a different part of heavy rain and draws complement each other. A third draw tests it.",
+
+  "models": {
+    "tailA2000s3": "bris/train/finetune_tail_a_seed3.yaml (finetune_tail_a with base seed 20261024) at step 2000: ~/bris-models/tailA2000s3/tailA2000s3-step002000_inference.ckpt",
+    "control2000": "the control arm, seed 20260909, already forecast for the test year",
+    "control2000s2": "F, the control arm on seed 20261003, already forecast for the test year",
+    "tailA2000": "A, seed 20260909", "tailA2000s2": "A2, seed 20261003"
+  },
+  "note_on_the_comparator": "No control arm exists on seed 20261024. Seed alone moved the control arm by about 0.3 % (F against control2000), small against the effects here, so A3 is compared with the control arm on A's seed. It is the same comparator A was measured against, so the three single draws are on one footing.",
+
+  "test": "exactly as evaluation/a_replication_plan.json: 2025-08-01..2026-09-06, 4 members, BRIS_LEADTIMES=7, +30 h, strict common cases of the models and MEPS, scripts/hits_and_calibration.py --cv month --replicates 5000 --meps. Forecasts may be split into date chunks; a final pass fills any day a job lost to the cluster.",
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after month-out isotonic calibration, tailA2000s3 minus control2000, four members each",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "registered_expectation": "Exploratory, with scripts/pool_seeds.py extended to the third draw: the eight-member pools A + A3 and A2 + A3 each beat control2000 + F (eight members) in calibrated Brier at 20 mm by more than the better of their two single draws does against its own control arm. Reported whichever way it goes.",
+
+  "secondary_reported": [
+    "tailA2000s3 minus control2000s2 (F), calibrated and raw, at 20 mm",
+    "raw Brier at 20 mm against control2000, with its sign and a paired block bootstrap",
+    "the same at 10 and 50 mm; ROC area; frequency bias",
+    "mean precipitation over all station-days relative to observed (scripts/precip_overall.py)",
+    "2 m temperature and 10 m wind against Frost with scripts/general_skill.py, against control2000 (exploratory)",
+    "the spread of the three single-draw results, as the plain measure of how much one draw of A wanders"
+  ],
+
+  "not_claimed": "Three draws of one recipe at step 2000 on one test year. A pooled ensemble is two or three models run side by side, not one better model, and doubles or triples the forecast cost."
+}

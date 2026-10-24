@@ -1,0 +1,20 @@
+# tail-mm: 20   (read by finetune.sbatch's threshold check)
+# base-seed: 20261024   (read by finetune.sbatch; a third seed, used by no other run)
+# TAIL VARIANT A, THIRD DRAW: THE SAME RUN WITH A NEW SEED.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_a_seed3
+#   scripts/diff_configs.py finetune_tail_a finetune_tail_a_seed3
+#
+# A and A2 are the same recipe on two seeds and came out at -6.1 and -2.6 per
+# cent against their control arms: one recipe, a wide spread between draws.
+# Pooled into one eight-member ensemble they gave -8.4 per cent against the
+# two control arms pooled, more than either draw alone, while pooling did
+# almost nothing for the control arms or Pavo (scripts/pool_seeds.py). This
+# third draw asks whether that holds: how far a single draw of A wanders, and
+# whether pooling it with A or A2 repeats the bonus. Scored by
+# evaluation/a_seed3_plan.json. Nothing but the seed differs from
+# finetune_tail_a.
+
+defaults:
+- finetune_tail_a
+- _self_
