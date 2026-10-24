@@ -23,6 +23,8 @@ so it is scored by that script and by scripts/reliability.py unchanged:
     tailC8    tailC2000 + tailC2000s2              the same two seeds
 
 The six four-member models are kept beside them under their own names.
+Other pairs are given as --pool LABEL=first+second (repeatable), which
+replaces the three above.
 scripts/_cases.py refuses unless every cache holds the same station-days.
 """
 
@@ -51,8 +53,15 @@ POOLS = {
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--cases", action="append", required=True, type=Path)
+    ap.add_argument("--pool", action="append", default=[], metavar="LABEL=FIRST+SECOND")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
+    pools = dict(POOLS)
+    if args.pool:
+        pools = {}
+        for item in args.pool:
+            label, members = item.split("=", 1)
+            pools[label] = tuple(members.split("+"))
 
     kinds = set()
     for path in args.cases:
@@ -61,7 +70,7 @@ def main() -> int:
     if len(kinds) != 1:
         raise SystemExit(f"the caches mix interpolations {sorted(kinds)}; pool only like with like")
 
-    singles = [m for pair in POOLS.values() for m in pair]
+    singles = list(dict.fromkeys(m for pair in pools.values() for m in pair))
     c = _cases.load(args.cases, singles)
     lead = _cases.LEAD
     out = {f"obs_{lead}": c["obs"], f"dates_{lead}": c["dates"], f"station_{lead}": c["station"],
@@ -70,9 +79,9 @@ def main() -> int:
         out[f"meps_{lead}"] = c["meps"]
     for label in singles:
         out[f"model_{label}_{lead}"] = c["models"][label]
-    for label, (first, second) in POOLS.items():
-        out[f"model_{label}_{lead}"] = np.concatenate([c["models"][first], c["models"][second]], axis=1)
-        print(f"{label}: {first} + {second} -> {out[f'model_{label}_{lead}'].shape[1]} members")
+    for label, members in pools.items():
+        out[f"model_{label}_{lead}"] = np.concatenate([c["models"][m] for m in members], axis=1)
+        print(f"{label}: {' + '.join(members)} -> {out[f'model_{label}_{lead}'].shape[1]} members")
 
     args.out.expanduser().parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(args.out.expanduser(), **out)
