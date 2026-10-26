@@ -1,0 +1,40 @@
+# tail-mm: none   (read by finetune.sbatch: no tail term, so the units check runs on finetune)
+# CONTROL ARM WITH BRIS'S SPECTRAL TERM RESTORED.
+#
+#   scripts/diff_configs.py finetune finetune_spectral
+#   sbatch bris/slurm/finetune.sbatch finetune_spectral
+#
+# A + spectral (finetune_tail_a_spectral) beat the control arm by 3.5 per cent
+# at 20 mm, but that comparison carries two differences, the tail term and
+# the spectral term, and against A alone it lost heavy-rain skill while its
+# fields came back to Bris's spectrum. This is the missing arm: the control
+# arm plus the same spectral term, at the same weight and seed, so that
+# A + spectral against it differs by the tail term alone. It is also Bris's
+# own loss, the two terms it was pretrained with, fine-tuned on the same data.
+#
+# The diff against finetune should show the losses list growing by one entry
+# and loss_weights by one number. Both terms run with alpha 1.0 whatever
+# their lines say; see the note above training_loss in finetune.yaml.
+
+defaults:
+- finetune
+- _self_
+
+training:
+  training_loss:
+    losses:
+        # --- identical to finetune.yaml -----------------------------------
+        - _target_: anemoi.training.losses.AlmostFairKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+
+        # --- identical to finetune_tail_a_spectral.yaml --------------------
+        - _target_: xbris.spectral.SpectralAlmostFairKernelCRPS
+          xdim: 849
+          ydim: 969
+          alpha: 0.95
+          chunk_variables: 8
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
+
+    # Bris's own [1.0, 0.1].
+    loss_weights: [1.0, 0.1]
