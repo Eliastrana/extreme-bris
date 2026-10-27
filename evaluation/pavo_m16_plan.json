@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-27",
+  "status": "FROZEN before any 16-member test-year forecast of Pavo existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "Is one Pavo model with sixteen members as good as the full MEPS ensemble on heavy rain?",
+  "origin": "On the test year, with four members each, Pavo was level with four MEPS members at 20 mm (calibrated Brier +1.4 %, interval across zero) where plain Bris and the control arm were worse (+10.3 %, +9.5 %); the full fifteen-member MEPS ensemble beat everything with eight members or fewer. MEPS gains from members; whether Bris does is the question. On the validation period (exploratory; a period MET's own Bris training reached), Pavo with sixteen members came out at -2.5 % [-6.4, +0.8] against MEPS with fifteen at 20 mm. This plan tests it on the test year.",
+
+  "models": {
+    "tailC2000-m16": "Pavo, ~/bris-models/tailC2000/tailC2000-step002000_inference.ckpt, run with BRIS_MEMBERS=16, otherwise exactly as its four-member test-year forecasts",
+    "meps15": "the fifteen MEPS members valid from 00 UTC: 0, 1, 2, 9, 12 of D 00Z, 5, 6, 8, 11, 14 of D-1 23Z, 3, 4, 7, 10, 13 of D-1 22Z (scripts/fetch_meps_members.py)"
+  },
+  "comparison": "tailC2000-m16 minus meps15",
+  "days": "Sixteen members cost about four times four, so not every day fits before the H200 node is taken: every fifth day from 2025-08-01 on the H200 and every fifth day from 2025-08-03 on an A100, as many of them as finish. The days scored are those with a 16-member forecast; which days those are is decided by the schedule above, not by any result.",
+
+  "test": "scripts/hits_and_calibration.py at +30 h on the days run, strict common cases of tailC2000-m16, the four-member tailC2000 and control2000, MEPS and every one of the fifteen members (scripts/meps_members_cases.py), --cv month --replicates 5000.",
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after month-out isotonic calibration, tailC2000-m16 minus meps15",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0 (Pavo with sixteen members better)",
+    "negative_if": "the lower 95 percent bound is above 0 (MEPS better)",
+    "otherwise": "inconclusive, which on these days would mean no detectable difference"
+  },
+
+  "secondary_reported": [
+    "the same with operational calibration, fitted on the validation period and earlier months only (--cv past)",
+    "the same at 10 and 50 mm; ROC area; frequency bias",
+    "on the same days: four-member Pavo, control2000 and plain-member MEPS (4), so the subset can be set against the full-year results",
+    "16 against 4 members of Pavo on the same days: what the extra members alone are worth"
+  ],
+
+  "not_claimed": "One draw of Pavo, at step 2000, on a subset of about two in five days of the test year. Sixteen members cost four times four at inference."
+}
