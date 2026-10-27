@@ -20,6 +20,14 @@ defaults:
 - finetune
 - _self_
 
+# WHAT THE RUN ACTUALLY DID (2026-10-27). This file does not set max_steps, so
+# it inherits finetune.yaml's 3 000, and the run (job 1444761) hit its 24 h
+# limit at about step 2 300. The plan scores the step-2 000 checkpoint, and the
+# learning-rate schedule is the same 3 000-step cosine that A + spectral's
+# step 2 000 had (finetune_tail_a sets iterations 3 000 with max_steps 2 000),
+# so that checkpoint is the model the plan describes. Left as it ran rather
+# than edited, so the file still matches the job.
+
 training:
   training_loss:
     losses:
