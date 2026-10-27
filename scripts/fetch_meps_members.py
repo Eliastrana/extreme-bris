@@ -31,7 +31,9 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import random
 import sys
+import time
 import warnings
 from pathlib import Path
 
@@ -64,6 +66,34 @@ def open_member(cycle: dt.datetime, member: int):
     return xr.open_dataset(ARCHIVE.format(t=cycle, m=member), engine="pydap")
 
 
+class Missing(Exception):
+    """The day's file is not there, or too short: final, saved as missing."""
+
+
+def retrying(fetch, tries: int = 7):
+    """Run fetch(), backing off on rate limits and network errors.
+
+    thredds answers 429 Too Many Requests when many of these run at once, and
+    an answer like that says nothing about the data. Only a 404 (no such file)
+    or a short run is final. Anything else that outlasts the retries returns
+    None, so the day is left unsaved and a rerun tries it again.
+    """
+    for attempt in range(tries):
+        try:
+            return fetch()
+        except Missing:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            text = str(exc)
+            if "404" in text:
+                raise Missing(text[:90]) from exc
+            if attempt == tries - 1:
+                print(f"    gave up after {tries} tries: {type(exc).__name__}: {text[:80]}")
+                return None
+            time.sleep(min(20 * 2 ** attempt, 600) * (0.75 + 0.5 * random.random()))
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--member", type=int, required=True)
@@ -87,15 +117,20 @@ def main() -> int:
     print(f"=== member {args.member}, lag {args.lag} h, {len(days)} days, leads {leads}")
 
     obs = load_observations(args.observations)
-    first = days[0] - dt.timedelta(hours=args.lag)
+    def read_grid(when):
+        with open_member(when, args.member) as ds:
+            return (np.asarray(ds["latitude"].values, dtype="float64"),
+                    np.asarray(ds["longitude"].values, dtype="float64"))
+
     for probe in days:
         try:
-            with open_member(probe - dt.timedelta(hours=args.lag), args.member) as ds:
-                lat = np.asarray(ds["latitude"].values, dtype="float64")
-                lon = np.asarray(ds["longitude"].values, dtype="float64")
+            got = retrying(lambda: read_grid(probe - dt.timedelta(hours=args.lag)))
+        except Missing:
+            got = None
+        if got is not None:
+            lat, lon = got
             break
-        except Exception as exc:  # noqa: BLE001
-            print(f"  no grid from {probe:%Y-%m-%d}: {type(exc).__name__}")
+        print(f"  no grid from {probe:%Y-%m-%d}")
     else:
         raise SystemExit("no file of this member opens in the whole period")
     idx, dist = nearest(obs["lat"], obs["lon"], lat.ravel(), lon.ravel())
@@ -116,8 +151,8 @@ def main() -> int:
             grid[:, di, :] = np.load(part)
             continue
         cycle = day - dt.timedelta(hours=args.lag)
-        block = np.full((len(obs["stations"]), len(leads)), np.nan, dtype="float32")
-        try:
+
+        def fetch_day():
             with open_member(cycle, args.member) as ds:
                 times = np.asarray(ds["time"].values).astype("datetime64[h]")
                 # accumulations at D00Z-6h .. D00Z+max_lead, those inside the run
@@ -125,7 +160,7 @@ def main() -> int:
                 pos = np.searchsorted(times, valid)
                 inside = (pos < len(times)) & (times[np.minimum(pos, len(times) - 1)] == valid)
                 if not inside[1:].all():
-                    raise ValueError(f"run ends {times[-1]}, before +{leads[-1]} h from {day:%Y-%m-%d}")
+                    raise Missing(f"run ends {times[-1]}, before +{leads[-1]} h from {day:%Y-%m-%d}")
                 take = pos[inside]
                 # a strided slice when the steps are evenly spaced, so the server sends only those
                 steps = (slice(int(take[0]), int(take[-1]) + 1, 6) if np.all(np.diff(take) == 6)
@@ -137,10 +172,16 @@ def main() -> int:
                 if args.lag == 0:
                     full[0] = full[1]          # run starts at D00Z: nothing fell before lead 0
                 amounts = np.maximum(np.diff(full, axis=0), 0.0)   # windows ending at each lead
-                block = amounts.T.astype("float32")
-        except Exception as exc:  # noqa: BLE001
+                return amounts.T.astype("float32")
+
+        try:
+            block = retrying(fetch_day)
+        except Missing as exc:
             missing += 1
-            print(f"  {day:%Y-%m-%d} unavailable: {type(exc).__name__}: {str(exc)[:90]}")
+            print(f"  {day:%Y-%m-%d} not in the archive: {exc}")
+            block = np.full((len(obs["stations"]), len(leads)), np.nan, dtype="float32")
+        if block is None:
+            continue                      # transient; left unsaved so a rerun tries again
         np.save(part, block)
         grid[:, di, :] = block
         if (di + 1) % 20 == 0:
