@@ -103,6 +103,26 @@ def isotonic(x: np.ndarray, y: np.ndarray) -> dict[float, float]:
     return {float(v): b[0] / b[1] for b in blocks for v in b[2]}
 
 
+def apply_map(mapping: dict[float, float], p: np.ndarray) -> np.ndarray:
+    """A fitted isotonic map applied to probabilities; unseen values take the nearest seen one's fit."""
+    known = np.array(sorted(mapping))
+    return np.array([mapping[float(known[np.argmin(np.abs(known - v))])] for v in p])
+
+
+def calibrated_past(p: np.ndarray, event: np.ndarray, block: np.ndarray,
+                    p_fit: np.ndarray, event_fit: np.ndarray) -> np.ndarray:
+    """As a forecaster in operation would: each block calibrated with a map fitted
+    on the earlier period (the --fit-cache cases) plus every earlier block of these
+    cases, never on the block itself or anything after it."""
+    out = np.empty_like(p)
+    for b in np.unique(block):
+        test = block == b
+        past = block < b
+        mapping = isotonic(np.concatenate([p_fit, p[past]]), np.concatenate([event_fit, event[past]]))
+        out[test] = apply_map(mapping, p[test])
+    return out
+
+
 def calibrated_cv(p: np.ndarray, event: np.ndarray, block: np.ndarray) -> np.ndarray:
     out = np.empty_like(p)
     for b in np.unique(block):
@@ -127,8 +147,10 @@ def main() -> int:
     ap.add_argument("--cache", type=Path, default=None)
     ap.add_argument("--meps", type=Path, default=None,
                     help="MEPS point forecasts; with it, MEPS joins the strict common-case rule, as in the main evaluation")
-    ap.add_argument("--cv", choices=["week", "month"], default="week",
-                    help="the block each case is calibrated out of: seven-day blocks, or calendar months")
+    ap.add_argument("--cv", choices=["week", "month", "past"], default="week",
+                    help="the block each case is calibrated out of: seven-day blocks, or calendar months; "
+                         "past is operational: each calendar month calibrated on --fit-cache plus the earlier "
+                         "months only")
     ap.add_argument("--fit-cache", type=Path, default=None,
                     help="cases from another period (a --cache file of this script) to fit the calibration on instead; "
                          "the fitted maps are applied to these cases, which are then fully out of sample")
@@ -169,6 +191,8 @@ def main() -> int:
         block = ((dates - dates.min()).astype(int) // 7)
     else:
         block = dates.astype("datetime64[M]").astype(int)
+    if args.cv == "past" and not args.fit_cache:
+        raise SystemExit("--cv past needs --fit-cache: the earlier period the first month is calibrated on")
     fit = None
     if args.fit_cache:
         with np.load(args.fit_cache.expanduser(), allow_pickle=False) as data:
@@ -176,7 +200,8 @@ def main() -> int:
     ens = {l: cases[f"model_{l}_{LEAD}"] for l in labels}
     m = ens[labels[0]].shape[1]
     report = {"exploratory": True, "lead_hours": LEAD, "station_days": int(o.size), "members": int(m),
-              "calibration": ({"fitted_on": str(args.fit_cache)} if fit is not None else {"cross_validation": args.cv}),
+              "calibration": ({"fitted_on": str(args.fit_cache), "past_only": args.cv == "past"} if fit is not None
+                              else {"cross_validation": args.cv}),
               "meps_in_common_cases": bool(args.meps), "interpolation": args.interpolation,
               "thresholds": {}}
     print(f"{o.size:,} station-days, {m} members, +{LEAD} h, comparator {args.comparator}")
@@ -193,9 +218,11 @@ def main() -> int:
                 cal = calibrated_cv(p, event.astype(float), block)
             else:
                 pf = (fit[f"model_{l}_{LEAD}"] > t).mean(axis=1)
-                mapping = isotonic(pf, (fit[f"obs_{LEAD}"] > t).astype(float))
-                known = np.array(sorted(mapping))
-                cal = np.array([mapping[float(known[np.argmin(np.abs(known - v))])] for v in p])
+                ef = (fit[f"obs_{LEAD}"] > t).astype(float)
+                if args.cv == "past":
+                    cal = calibrated_past(p, event.astype(float), block, pf, ef)
+                else:
+                    cal = apply_map(isotonic(pf, ef), p)
             cal_cases[l] = (cal - event) ** 2
             raw_cases[l] = (p - event) ** 2
             res["models"][l] = {
@@ -248,7 +275,8 @@ def main() -> int:
                   f"[{d['event_days']['ci_lower']:+.4f}, {d['event_days']['ci_upper']:+.4f}]   "
                   f"non-event days {d['non_event_days']['mean']:+.4f} "
                   f"[{d['non_event_days']['ci_lower']:+.4f}, {d['non_event_days']['ci_upper']:+.4f}]")
-        how = "fitted on --fit-cache, applied out of sample" if fit is not None else f"{args.cv}-out cross-validation"
+        how = ("fitted on --fit-cache plus earlier months only" if fit is not None and args.cv == "past"
+               else "fitted on --fit-cache, applied out of sample" if fit is not None else f"{args.cv}-out cross-validation")
         print(f"  Brier, raw -> calibrated ({how}):")
         for l in labels:
             r = res["models"][l]
