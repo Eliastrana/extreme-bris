@@ -1,0 +1,52 @@
+# tail-mm: none   (read by finetune.sbatch: Pavo has no threshold, so the units check runs on finetune)
+# PAVO WITH BRIS'S SPECTRAL TERM RESTORED.
+#
+#   scripts/diff_configs.py finetune_tail_c finetune_tail_c_spectral
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_c_spectral
+#
+# Against the control arm with the spectral term (finetune_spectral), Pavo
+# was still better on heavy rain, -2.9 % at 20 mm after calibration, and the
+# best at ranking wet days, but its fields are noisy (wind 1.3-1.5 times the
+# analysis' small-scale variance) and too wet (x1.18). A + spectral showed
+# that a hard-threshold tail term and the spectral term pull against each
+# other and leave precipitation too smooth. Pavo's term has no threshold, so
+# it need not. This is Pavo and nothing else, plus the spectral term at
+# Bris's weight: same seed, steps and tail weight.
+#
+# max_steps is set here, not inherited, so the run stops at the step it is
+# scored at (finetune_spectral inherited 3 000 and ran into its time limit).
+
+defaults:
+- finetune_tail_c
+- _self_
+
+training:
+  max_steps: 2000
+  lr:
+    iterations: 3000
+  training_loss:
+    losses:
+        # --- identical to finetune_tail_c.yaml ----------------------------
+        - _target_: anemoi.training.losses.AlmostFairKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+
+        # --- identical to finetune_spectral.yaml ---------------------------
+        - _target_: xbris.spectral.SpectralAlmostFairKernelCRPS
+          xdim: 849
+          ydim: 969
+          alpha: 0.95
+          chunk_variables: 8
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights']
+
+        # --- identical to finetune_tail_c.yaml ----------------------------
+        - _target_: xbris.losses.TailWeightedKernelCRPS
+          alpha: 0.95
+          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'lam_node_weights']
+          tail_threshold: -1.0e6
+          tail_variable: tp
+          tail_index: 38
+          tail_scale: 1.0
+
+    # Bris's [1.0, 0.1], then Pavo's weight.
+    loss_weights: [1.0, 0.1, 39.09]

@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-10-28",
+  "status": "FROZEN before tailCfft2000 was trained and before any forecast of it existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "Pavo with Bris's spectral term: does it keep Pavo's heavy-rain gain over the control arm with the spectral term, with realistic fields?",
+  "origin": "With the spectral term restored, the control arm (controlfft2000) improved by -4.3 % at 20 mm and its fields came back to Bris's spectrum. Against it, Pavo (no spectral term) was still better after calibration, -0.00060 [-0.00113, -0.00005] (-2.9 %), with ROC area 0.908 against 0.863, but with noisy fields and too much rain; A + spectral was not better than it (+0.9 %, interval across zero) and its precipitation became too smooth. This plan adds the spectral term to Pavo.",
+
+  "models": {
+    "tailCfft2000": "bris/train/finetune_tail_c_spectral.yaml: finetune_tail_c plus xbris.spectral.SpectralAlmostFairKernelCRPS, loss_weights [1.0, 0.1, 39.09], seed 20260909, step 2000",
+    "controlfft2000": "the control arm with the spectral term, seed 20260909, step 2000, already forecast for the test year",
+    "tailC2000": "Pavo, seed 20260909, already forecast for the test year"
+  },
+  "comparison": "tailCfft2000 minus controlfft2000",
+  "training": "one run, bris/slurm/finetune.sbatch finetune_tail_c_spectral, on an H200 whenever one is free; queued 2026-10-28 behind other users' jobs. A run lost to the node is restarted from the beginning, unchanged.",
+
+  "test": "exactly as evaluation/control_spectral_plan.json: 2025-08-01..2026-09-06, 4 members, BRIS_LEADTIMES=7, +30 h, strict common cases of the models and MEPS, scripts/hits_and_calibration.py --cv month --replicates 5000 --meps.",
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after month-out isotonic calibration, tailCfft2000 minus controlfft2000",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "registered_expectation": "scripts/spectra.py, every 12th day, +36 h: tailCfft2000's small-scale variance (5-20 km) for wind and precipitation lies between 0.8 and 1.2 of the analysis', where Pavo's was 1.25-1.48 (wind) and 1.32-1.41 (precipitation). Reported whichever way it goes.",
+
+  "secondary_reported": [
+    "tailCfft2000 minus tailC2000, calibrated and raw, at 20 mm: what the spectral term does to Pavo",
+    "raw Brier at 20 mm against controlfft2000, with its sign and a paired block bootstrap",
+    "the same at 10 and 50 mm; ROC area; frequency bias; mean precipitation over all station-days",
+    "operational calibration (--cv past) against controlfft2000 if validation forecasts of both exist",
+    "2 m temperature and 10 m wind against Frost with scripts/general_skill.py, against control2000 (exploratory)",
+    "four members against the four MEPS members of 00 UTC on the station-days where all are present (exploratory)"
+  ],
+
+  "not_claimed": "One draw at step 2000 on one test year."
+}
