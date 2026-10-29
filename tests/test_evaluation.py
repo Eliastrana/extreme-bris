@@ -15,6 +15,7 @@ from xbris.evaluation import (
     reliability_table,
     strict_common_mask,
     threshold_weighted_crps_cases,
+    window_sums,
 )
 
 
@@ -51,6 +52,14 @@ class EvaluationTests(unittest.TestCase):
         steps = np.ones((len(leads), 1, 1))
         steps[0] = 1000.0
         self.assertAlmostEqual(float(daily_sums(steps, leads, [30])[0, 0, 0]), 4.0)
+
+    def test_six_hour_windows_are_single_steps(self):
+        leads = np.arange(0, 37, 6)
+        steps = leads.astype(float)[:, None, None]
+        steps[0] = 1000.0
+        sums = window_sums(steps, leads, [6, 12, 36], 6)
+        np.testing.assert_allclose(sums[:, 0, 0], [6, 12, 36])
+        np.testing.assert_allclose(window_sums(steps, leads, [30], 24), daily_sums(steps, leads, [30]))
 
     def test_deaccumulation(self):
         cumulative = np.array([0.0, 1.0, 3.0, 6.0])[:, None, None]

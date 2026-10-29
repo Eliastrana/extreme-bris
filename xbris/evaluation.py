@@ -167,6 +167,15 @@ def daily_sums(step_amounts, leads_hours, end_leads_hours) -> np.ndarray:
     +12, +18, +24, and +30 h.  The analysis at +0 h and the +6 h step are not
     part of that day.
     """
+    return window_sums(step_amounts, leads_hours, end_leads_hours, 24)
+
+
+def window_sums(step_amounts, leads_hours, end_leads_hours, hours: int) -> np.ndarray:
+    """Sums over the `hours` ending at selected leads; daily_sums is hours=24.
+
+    With hours equal to the step, each window is a single step: the six-hour
+    amount ending at +6 h is the step ending at +6 h, never the analysis.
+    """
     step = np.asarray(step_amounts, dtype="float64")
     leads = np.asarray(leads_hours, dtype=int)
     ends = np.asarray(end_leads_hours, dtype=int)
@@ -178,18 +187,18 @@ def daily_sums(step_amounts, leads_hours, end_leads_hours) -> np.ndarray:
     if not np.all(spacing == spacing[0]) or int(spacing[0]) <= 0:
         raise ValueError("lead times must be strictly increasing and evenly spaced")
     step_hours = int(spacing[0])
-    if 24 % step_hours:
-        raise ValueError(f"{step_hours} h steps do not divide a 24 h window")
-    count = 24 // step_hours
+    if hours % step_hours:
+        raise ValueError(f"{step_hours} h steps do not divide a {hours} h window")
+    count = hours // step_hours
     where = {int(lead): i for i, lead in enumerate(leads)}
     out = []
     for end in ends:
         wanted = [int(end) - step_hours * (count - 1 - i) for i in range(count)]
         if wanted[0] <= 0:
-            raise ValueError(f"day ending at +{int(end)} h reaches the analysis step")
+            raise ValueError(f"window ending at +{int(end)} h reaches the analysis step")
         missing = [lead for lead in wanted if lead not in where]
         if missing:
-            raise ValueError(f"day ending at +{int(end)} h is missing leads {missing}")
+            raise ValueError(f"window ending at +{int(end)} h is missing leads {missing}")
         out.append(step[[where[lead] for lead in wanted]].sum(axis=0))
     return np.stack(out, axis=0)  # end lead, member, station
 

@@ -39,13 +39,13 @@ import xarray as xr  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from xbris.evaluation import (  # noqa: E402
-    daily_sums,
     deaccumulate,
     ensemble_metric_cases,
     paired_block_bootstrap,
     strict_common_mask,
     summarize_deterministic,
     summarize_ensemble,
+    window_sums,
 )
 from xbris.stations import load_observations, nearest  # noqa: E402
 
@@ -163,13 +163,14 @@ class BrisReader:
     """
 
     def __init__(self, obs: dict, max_distance_km: float, accumulation: str,
-                 interpolation: str = "nearest") -> None:
+                 interpolation: str = "nearest", window_hours: int = 24) -> None:
         if interpolation not in ("nearest", "bilinear"):
             raise ValueError(f"unknown interpolation {interpolation!r}")
         self.obs = obs
         self.max_distance_km = max_distance_km
         self.accumulation = accumulation
         self.interpolation = interpolation
+        self.window_hours = window_hours  # read() sums this many hours ending at each end lead
         self._row: np.ndarray | None = None
         self._col: np.ndarray | None = None
         self._keep: np.ndarray | None = None
@@ -246,7 +247,7 @@ class BrisReader:
             raise ValueError(f"{path.name}: fewer than two time steps")
         leads = ((times - times[0]) / np.timedelta64(1, "h")).astype(int)
         steps, convention = deaccumulate(steps, self.accumulation)
-        sums = daily_sums(steps, leads, end_leads)
+        sums = window_sums(steps, leads, end_leads, self.window_hours)
         full = np.full(
             (len(end_leads), sums.shape[1], len(self.obs["stations"])),
             np.nan,
@@ -263,8 +264,9 @@ class BrisReader:
 class MepsReader:
     """Daily sums from the station-point MEPS archive file."""
 
-    def __init__(self, path: Path, obs: dict, max_distance_km: float) -> None:
+    def __init__(self, path: Path, obs: dict, max_distance_km: float, window_hours: int = 24) -> None:
         self.path = path
+        self.window_hours = window_hours
         with np.load(path, allow_pickle=False) as data:
             self.values = np.asarray(data["values"], dtype="float64")
             stations = data["stations"].astype(str)
@@ -294,7 +296,7 @@ class MepsReader:
         stations = np.flatnonzero(self.keep)
         source = self.order[stations]
         steps = self.values[source, ci, :].T[:, None, :]  # time, member=1, station
-        sums = daily_sums(steps, self.leads, end_leads)
+        sums = window_sums(steps, self.leads, end_leads, self.window_hours)
         full = np.full((len(end_leads), len(self.keep)), np.nan, dtype="float64")
         full[:, stations] = sums[:, 0, :]
         return full
