@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-11-10",
+  "status": "FROZEN before any forecast beyond +36 h of these models existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "Where does the heavy-rain gain end? Six-hour rain from +6 to +60 h, the horizon MET evaluates Bris to.",
+  "origin": "The lead-by-lead score (evaluation/lead_plan.json) stopped at +36 h, where the gain of Pavo and A over the control arm with the spectral term was gone and the all-rain error had drifted worse. MET's own evaluation of Bris runs to +60 h (ten six-hour steps), and MEPS to +61 h. Pavo, A and the controls were only forecast to +36 h to save GPU time. This plan extends them to +60 h on every second day of the test year.",
+
+  "models": {
+    "baseline": "plain Bris as MET released it, existing 60 h forecasts in ~/bris-runs/evaluation/baseline, cut to the days below",
+    "control2000": "control arm without the spectral term, ~/bris-models/control/control-step002000_inference.ckpt, new forecasts",
+    "controlfft2000": "control arm with Bris' spectral term, the comparator, ~/bris-models/controlfft2000/controlfft2000-step002000_inference.ckpt, new forecasts",
+    "tailA2000": "A, ~/bris-models/tailA2000/tailA2000-step002000_inference.ckpt, new forecasts",
+    "tailC2000": "Pavo, ~/bris-models/tailC2000/tailC2000-step002000_inference.ckpt, new forecasts",
+    "meps": "the MEPS members valid from 00 UTC, used only if the stored member files reach +60 h; if they do not, MEPS is left out and the report says so"
+  },
+
+  "forecasts": "One forecast per model on every second day at 00 UTC, four members, BRIS_LEADTIMES=11 (+0 to +60 h in ten six-hour steps), exactly as the +36 h test-year forecasts otherwise. BRIS_STEP_DAYS=2. Year 2 dataset 2025-08-01 to 2025-09-07 (19 days, last 2025-09-06), year 1 dataset 2025-09-08 to 2026-09-06 (182 days, last 2026-09-05), 201 days in all. Run on the 80 GB A100 cards of g002 (partition hgx2q), output in ~/bris-runs/long-lead/<model>. The days are decided by this schedule and not by any result; a day that failed is rerun, a day that cannot be run is dropped for every model.",
+
+  "period": "test year, 00 UTC cycles 2025-08-01 to 2026-09-05, every second day",
+  "leads_hours": [6, 12, 18, 24, 30, 36, 42, 48, 54, 60],
+  "truth": "as lead_plan.json: hourly Frost gauges (observations/precipitation.npz) summed over the six hours ending at each valid time; only complete windows; gauges flagged by scripts/check_gauges.py left out; model value from the nearest cell.",
+
+  "cases": "a gauge and cycle is kept only if the observation and every Bris model are present at every one of the ten leads, so each lead is scored on the same gauge-cycles",
+  "thresholds_mm_per_6h": [5, 10, 20],
+  "calibration": "month-out isotonic, fitted per model, per lead and per threshold; month of the cycle",
+  "bootstrap": "paired, seven-day blocks of cycle dates, so every lead of a cycle stays in one block; 5000 replicates",
+
+  "predictions_before_the_run": [
+    "the gain of Pavo and A over controlfft2000 at 10 mm per 6 h is not present at +48 and +60 h",
+    "the all-rain fair CRPS of Pavo and A is worse than controlfft2000 at +60 h and worse than at +36 h",
+    "plain Bris and controlfft2000 are level at +60 h within the interval"
+  ],
+
+  "primary_endpoint": {
+    "measure": "Brier score at 10 mm per 6 h after calibration, at +60 h, tailC2000 minus controlfft2000",
+    "positive_if": "the upper 95 percent bound is below 0: Pavo still better at the last lead",
+    "negative_if": "the lower 95 percent bound is above 0: Pavo worse than the control arm with the spectral term",
+    "otherwise": "inconclusive"
+  },
+  "key_secondary": {
+    "measure": "the same difference at +60 h minus that at +12 h, per gauge-cycle, bootstrapped the same way",
+    "why_these_two": "the windows ending at +12 h and +60 h are both 06 to 12 UTC, two and a half days apart, so the contrast is lead and not time of day",
+    "shrinks_if": "the lower bound is above 0 (the advantage is smaller at +60 h than at +12 h)"
+  },
+  "secondary_reported": [
+    "the same primary difference for tailA2000, and at 5 and 20 mm per 6 h",
+    "the primary difference at every lead from +6 to +60 h, as a curve, for tailC2000 and tailA2000 against both control2000 and controlfft2000",
+    "calibrated Brier skill score and ROC area per model and lead, with plain Bris in every curve",
+    "fair CRPS for all rain per model and lead, change against controlfft2000, to see whether the drift continues",
+    "the +6 to +36 h results of lead_plan.json recomputed on these days, so the two sets of leads sit on one set of cases",
+    "MEPS at the same leads, if the member files allow it"
+  ],
+
+  "not_claimed": "One draw of each model at step 2000, four members, every second day (201 cycles, about half the test year), 00 UTC starts only, hourly gauges which are a different network from the daily gauges of the earlier results. Nothing is claimed for forecasts that start at other hours. Differences at a single lead are exploratory except the primary endpoint and the key secondary."
+}
