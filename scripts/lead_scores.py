@@ -63,6 +63,9 @@ THRESHOLDS = [5.0, 10.0, 20.0]
 MEPS_SETS = {"meps4": [0, 1, 2, 9], "meps15": list(range(15))}
 MAX_DISTANCE_KM = 5.0
 START, END = "2025-08-01", "2026-09-06"
+STEP_DAYS = 1      # every Nth cycle of the period; 2 in evaluation/long_lead_plan.json
+USE_MEPS = True    # the MEPS member files only reach +36 h
+PLAN = "evaluation/lead_plan.json"
 
 _OBS: dict = {}
 
@@ -99,7 +102,7 @@ def read_model(job: tuple[str, str, list[str]]) -> tuple[str, np.ndarray]:
 def collect(specs: dict, observations: Path, members_dir: Path, start: str, end: str) -> dict:
     obs, flagged = hourly_truth(observations)
     _OBS.update(obs)
-    cycles = ev.expected_cycles(start, end, 0)
+    cycles = ev.expected_cycles(start, end, 0)[::STEP_DAYS]
     print(f"{len(cycles)} cycles, {len(obs['stations'])} hourly gauges, {len(flagged)} flagged and left out", flush=True)
 
     starts = np.array([np.datetime64(c) for c in cycles], dtype="datetime64[s]")
@@ -110,7 +113,7 @@ def collect(specs: dict, observations: Path, members_dir: Path, start: str, end:
     with mp.get_context("fork").Pool(len(specs)) as pool:
         models = dict(pool.map(read_model, [(l, s, cycles) for l, s in specs.items()]))
 
-    wanted = sorted({m for ms in MEPS_SETS.values() for m in ms})
+    wanted = sorted({m for ms in MEPS_SETS.values() for m in ms}) if USE_MEPS else []
     meps = {}
     for m in wanted:
         reader = ev.MepsReader(members_dir / f"mbr{m:03d}.npz", obs, MAX_DISTANCE_KM, window_hours=WINDOW)
@@ -144,7 +147,7 @@ def collect(specs: dict, observations: Path, members_dir: Path, start: str, end:
 
 def ensembles(cases: dict, labels: list[str]) -> dict[str, np.ndarray]:
     ens = {l: cases[f"model_{l}"] for l in labels}
-    for name, ms in MEPS_SETS.items():
+    for name, ms in (MEPS_SETS.items() if USE_MEPS else []):
         ens[name] = np.stack([cases[f"meps_{m:03d}"] for m in ms], axis=2)
     return ens
 
@@ -159,7 +162,7 @@ def interval(diff: np.ndarray, dates: np.ndarray, replicates: int, scale: float)
 def score_set(name: str, sel: np.ndarray, ens: dict, obs: np.ndarray, cycle: np.ndarray,
               labels: list[str], comparator: str, primary: str | None, replicates: int) -> dict:
     dates, block = cycle[sel], cycle[sel].astype("datetime64[M]").astype(int)
-    out = {"cases_per_lead": int(sel.sum()), "comparator": comparator, "leads": {}, "contrast_36_minus_12": {}}
+    out = {"cases_per_lead": int(sel.sum()), "comparator": comparator, "leads": {}, f"contrast_{LEADS[-1]}_minus_12": {}}
     per_case = {}  # threshold -> label -> lead index -> calibrated squared error
     print(f"\n########## {name}: {int(sel.sum()):,} gauge-cycles at each lead, comparator {comparator}")
     for li, lead in enumerate(LEADS):
@@ -194,16 +197,18 @@ def score_set(name: str, sel: np.ndarray, ens: dict, obs: np.ndarray, cycle: np.
             res["thresholds"][f"{t:g}"] = row
         out["leads"][str(lead)] = res
 
-    i12, i36 = LEADS.index(12), LEADS.index(36)
+    last = LEADS[-1]
+    ckey = f"contrast_{last}_minus_12"
+    i12, i36 = LEADS.index(12), LEADS.index(last)
     for t in THRESHOLDS:
-        out["contrast_36_minus_12"][f"{t:g}"] = {}
+        out[ckey][f"{t:g}"] = {}
         pc = per_case[t]
         for l in labels:
             if l == comparator:
                 continue
             d = (pc[l][i36] - pc[comparator][i36]) - (pc[l][i12] - pc[comparator][i12])
             bt = paired_block_bootstrap(d, dates, block_days=7, replicates=replicates)
-            out["contrast_36_minus_12"][f"{t:g}"][l] = {
+            out[ckey][f"{t:g}"][l] = {
                 "mean": bt["mean_difference"], "ci_lower": bt["ci_lower"], "ci_upper": bt["ci_upper"]}
 
     for t in THRESHOLDS:
@@ -221,8 +226,8 @@ def score_set(name: str, sel: np.ndarray, ens: dict, obs: np.ndarray, cycle: np.
                 d = out["leads"][str(lead)]["thresholds"][f"{t:g}"]["models"][l]["calibrated_minus_comparator"]
                 cells.append(f"+{lead}: {d['percent']:+.1f} [{d['percent_ci'][0]:+.1f}, {d['percent_ci'][1]:+.1f}]")
             print(f"    {l:14s} " + "   ".join(cells))
-        for l, d in out["contrast_36_minus_12"][f"{t:g}"].items():
-            print(f"    {l:14s} (+36) - (+12) difference: {d['mean']:+.6f} [{d['ci_lower']:+.6f}, {d['ci_upper']:+.6f}]")
+        for l, d in out[ckey][f"{t:g}"].items():
+            print(f"    {l:14s} (+{last}) - (+12) difference: {d['mean']:+.6f} [{d['ci_lower']:+.6f}, {d['ci_upper']:+.6f}]")
     print(f"\n===== fair CRPS of all rain, % against {comparator} [95 %]")
     for l in labels:
         if l == comparator:
@@ -234,15 +239,15 @@ def score_set(name: str, sel: np.ndarray, ens: dict, obs: np.ndarray, cycle: np.
         print(f"    {l:14s} " + "   ".join(cells))
 
     if primary and primary in labels and primary != comparator:
-        d = out["leads"]["36"]["thresholds"]["10"]["models"][primary]["calibrated_minus_comparator"]
-        c = out["contrast_36_minus_12"]["10"][primary]
+        d = out["leads"][str(last)]["thresholds"]["10"]["models"][primary]["calibrated_minus_comparator"]
+        c = out[ckey]["10"][primary]
         verdict = "positive" if d["ci_upper"] < 0 else "negative" if d["ci_lower"] > 0 else "inconclusive"
         trend = "shrinks" if c["ci_lower"] > 0 else "grows" if c["ci_upper"] < 0 else "no detectable change"
-        out["primary"] = {"model": primary, "at_36h_10mm": d, "verdict": verdict,
-                          "contrast_36_minus_12": c, "contrast_verdict": trend}
-        print(f"\nPRIMARY {primary} - {comparator}, 10 mm in 6 h at +36 h, calibrated: "
+        out["primary"] = {"model": primary, f"at_{last}h_10mm": d, "verdict": verdict,
+                          ckey: c, "contrast_verdict": trend}
+        print(f"\nPRIMARY {primary} - {comparator}, 10 mm in 6 h at +{last} h, calibrated: "
               f"{d['percent']:+.1f} % [{d['percent_ci'][0]:+.1f}, {d['percent_ci'][1]:+.1f}] -> {verdict}")
-        print(f"KEY SECONDARY, +36 h against +12 h: {c['mean']:+.6f} [{c['ci_lower']:+.6f}, {c['ci_upper']:+.6f}] -> {trend}")
+        print(f"KEY SECONDARY, +{last} h against +12 h: {c['mean']:+.6f} [{c['ci_lower']:+.6f}, {c['ci_upper']:+.6f}] -> {trend}")
     return out
 
 
@@ -257,9 +262,19 @@ def main() -> int:
     ap.add_argument("--end", default=END, help="the plan's period; shorter only for a smoke test")
     ap.add_argument("--replicates", type=int, default=5000)
     ap.add_argument("--cache", type=Path, required=True)
+    ap.add_argument("--leads", default=None, help="comma-separated lead hours, default 6 to 36")
+    ap.add_argument("--step-days", type=int, default=1, help="use every Nth cycle of the period")
+    ap.add_argument("--no-meps", action="store_true", help="leave MEPS out (its member files stop at +36 h)")
+    ap.add_argument("--plan", default=None, help="the frozen plan this run belongs to")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
+    global LEADS, STEP_DAYS, USE_MEPS, PLAN
+    if args.leads:
+        LEADS = [int(x) for x in args.leads.split(",")]
+    STEP_DAYS, USE_MEPS = args.step_days, not args.no_meps
+    if args.plan:
+        PLAN = args.plan
     specs = dict(item.split("=", 1) for item in args.model)
     labels = list(specs)
     cache = args.cache.expanduser()
@@ -279,13 +294,14 @@ def main() -> int:
     ens = ensembles(cases, labels)
     obs, cycle = cases["obs"], cases["cycle"].astype("datetime64[D]")
     everything = np.ones(cycle.size, dtype=bool)
-    report = {"plan": "evaluation/lead_plan.json", "leads_hours": LEADS, "window_hours": WINDOW,
+    report = {"plan": PLAN, "step_days": STEP_DAYS, "leads_hours": LEADS, "window_hours": WINDOW,
               "flagged_gauges_left_out": cases["flagged"].tolist(),
               "models": score_set("models", everything, ens, obs, cycle, labels,
                                   args.comparator, args.primary, args.replicates),
-              "with_meps": score_set("with_meps", cases["with_meps"].astype(bool), ens, obs, cycle,
-                                     ["meps4"] + labels + ["meps15"],
-                                     "meps4", None, args.replicates)}
+              }
+    if USE_MEPS:
+        report["with_meps"] = score_set("with_meps", cases["with_meps"].astype(bool), ens, obs, cycle,
+                                        ["meps4"] + labels + ["meps15"], "meps4", None, args.replicates)
     args.out.expanduser().parent.mkdir(parents=True, exist_ok=True)
     args.out.expanduser().write_text(json.dumps(report, indent=2) + "\n")
     print(f"\nwrote {args.out}")
