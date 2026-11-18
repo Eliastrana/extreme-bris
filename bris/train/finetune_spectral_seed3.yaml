@@ -1,0 +1,21 @@
+# tail-mm: none   (read by finetune.sbatch: no tail term, so the units check runs on finetune)
+# base-seed: 20261024   (read by finetune.sbatch; A3's seed, shared with finetune_tail_a_seed3, see evaluation/seed_spectral_plan.json)
+# CONTROL ARM + SPECTRAL, DRAW 3: THE SAME RUN WITH ANOTHER SEED.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_spectral_seed3
+#   scripts/diff_configs.py finetune_spectral finetune_spectral_seed3
+#
+# The partner of finetune_tail_c_spectral_seed3: Bris's own loss, the same
+# seed, so the pair differs by the tail term alone. finetune_spectral
+# inherited max_steps 3 000 and was scored at its step 2 000 under a 3 000-step
+# cosine schedule. max_steps is set to 2 000 here with the same schedule, which
+# stops at the same step with the same learning rate as that checkpoint.
+
+defaults:
+- finetune_spectral
+- _self_
+
+training:
+  max_steps: 2000
+  lr:
+    iterations: 3000

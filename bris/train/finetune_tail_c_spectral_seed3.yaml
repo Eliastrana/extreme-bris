@@ -1,0 +1,15 @@
+# tail-mm: none   (read by finetune.sbatch's threshold check)
+# base-seed: 20261024   (read by finetune.sbatch; A3's seed, shared with finetune_tail_a_seed3, see evaluation/seed_spectral_plan.json)
+# PAVO + SPECTRAL, DRAW 3: THE SAME RUN WITH ANOTHER SEED.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_c_spectral_seed3
+#   scripts/diff_configs.py finetune_tail_c_spectral finetune_tail_c_spectral_seed3
+#
+# Pavo with the spectral term (finetune_tail_c_spectral) beat the control arm
+# with the spectral term on one draw, seed 20260909. This is the same recipe
+# on seed 20261024, to see whether that holds on another draw. Nothing but the
+# seed differs, including the measured tail weight and max_steps.
+
+defaults:
+- finetune_tail_c_spectral
+- _self_
