@@ -135,6 +135,16 @@ export HYDRA_FULL_ERROR=1
 CONFIG_SEED="$(grep -m1 -E '^# base-seed:' "$CONFIG" | awk '{print $3}')"
 export ANEMOI_BASE_SEED="${ANEMOI_BASE_SEED:-${CONFIG_SEED:-20260909}}"
 echo "=== seed    : $ANEMOI_BASE_SEED"
+# Training states drawn by weight (xbris.patches, XBRIS_OVERSAMPLE). An arm
+# that oversamples says so in an "# oversample:" line naming the weights file,
+# as the seed is named; arms without the line draw as anemoi does.
+CONFIG_OVERSAMPLE="$(grep -m1 -E '^# oversample:' "$CONFIG" | awk '{print $3}')"
+if [[ -n "$CONFIG_OVERSAMPLE" ]]; then
+    CONFIG_OVERSAMPLE="${CONFIG_OVERSAMPLE/#\~/$HOME}"
+    [[ -f "$CONFIG_OVERSAMPLE" ]] || { echo "ERROR: missing oversampling weights $CONFIG_OVERSAMPLE" >&2; exit 1; }
+    export XBRIS_OVERSAMPLE="$CONFIG_OVERSAMPLE"
+    echo "=== oversample: $XBRIS_OVERSAMPLE ($(sha256sum "$XBRIS_OVERSAMPLE" | cut -c1-16))"
+fi
 echo "=== chunks  : $ANEMOI_INFERENCE_NUM_CHUNKS outside training, mappers $ANEMOI_INFERENCE_NUM_CHUNKS_MAPPER"
 
 # Units, before anything expensive. The MEPS recipe renames

@@ -1,0 +1,21 @@
+# tail-mm: none   (read by finetune.sbatch's threshold check)
+# PAVO + SPECTRAL, TRAINED ON TWO STEPS AT A TIME (ROLLOUT 2).
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_c_spectral_rollout2
+#   scripts/diff_configs.py finetune_tail_c_spectral finetune_tail_c_spectral_rollout2
+#
+# Every fine-tune so far is trained on one six-hour step, while Bris itself
+# was trained on six. The long-lead run showed the fine-tunes falling behind
+# on all precipitation from +12 h. This is finetune_tail_c_spectral with the loss taken over
+# two steps of the model's own forecast, the cheapest rollout that tests it.
+# Same seed (20260909) and steps; scored by evaluation/rollout_plan.json.
+
+defaults:
+- finetune_tail_c_spectral
+- _self_
+
+training:
+  rollout:
+    start: 2
+    epoch_increment: 0
+    max: 2

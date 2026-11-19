@@ -37,6 +37,22 @@ never stored activations; it was the size of one member-stacked forward pass.
 
 XBRIS_SEQUENTIAL_MEMBERS=0 turns the patch off, for measuring what it costs.
 Whatever is chosen, choose it for both arms.
+
+TRAINING STATES CAN BE DRAWN WITH WEIGHTS (XBRIS_OVERSAMPLE).
+
+anemoi draws each epoch's training samples as one permutation of every valid
+date, so a state with heavy rain is seen exactly as often as a dry one. With
+XBRIS_OVERSAMPLE set to a JSON file of {"weights": {date: weight}}, the
+training dataset, and only that one, draws its samples with replacement in
+proportion to those weights instead. A sample's weight is the largest weight
+among its target dates, so a rollout sample counts as heavy if any step it is
+scored on is. Dates the file does not list weigh 1. Validation and test are
+untouched, so validation losses stay comparable with every other run.
+
+It works by handing the dataset's own random generator to anemoi's __iter__
+wrapped, so the one call that draws the permutation draws weighted indices
+instead, from the same seeded generator. Everything else __iter__ does is
+anemoi's own code, unchanged.
 """
 
 from __future__ import annotations
@@ -86,6 +102,93 @@ def ensemble_members_one_at_a_time() -> str:
     return label
 
 
+class _WeightedChoice:
+    """A numpy Generator whose choice() over the valid dates draws by weight."""
+
+    def __init__(self, rng, valid, p):
+        self._rng, self._valid, self._p = rng, valid, p
+
+    def choice(self, a, size=None, replace=True, p=None):
+        import numpy as np
+
+        if p is None and np.array_equal(np.asarray(a), self._valid):
+            return self._rng.choice(self._valid, size=size, replace=True, p=self._p)
+        return self._rng.choice(a, size=size, replace=replace, p=p)
+
+    def __getattr__(self, name):
+        return getattr(self._rng, name)
+
+
+def sample_weights(dates, valid, relative_date_indices, weights_by_date):
+    """One probability per valid index: the largest weight over its target dates."""
+    import numpy as np
+
+    targets = list(relative_date_indices)[1:] or list(relative_date_indices)
+    w = np.ones(len(valid), dtype=np.float64)
+    for k, i in enumerate(valid):
+        best = 1.0
+        for r in targets:
+            j = int(i) + int(r)
+            if 0 <= j < len(dates):
+                best = max(best, float(weights_by_date.get(dates[j], 1.0)))
+        w[k] = best
+    return w / w.sum()
+
+
+def weighted_training_draws(cls, weights_by_date, label="train") -> str:
+    """Make cls.__iter__ draw training samples with replacement, by weight."""
+    if getattr(cls.__iter__, "_xbris_weighted", False):
+        return f"{cls.__name__}: weighted training draws"
+    original = cls.__iter__
+
+    def __iter__(self):
+        if getattr(self, "label", None) != label or not getattr(self, "shuffle", False):
+            yield from original(self)
+            return
+        import numpy as np
+
+        valid = np.asarray(self.valid_date_indices)
+        if getattr(self, "_xbris_p", None) is None:
+            raw = getattr(self.data, "dates", None)
+            dates = [str(np.datetime_as_string(d, unit="s")) for d in raw] if raw is not None else []
+            self._xbris_p = sample_weights(dates, valid, self.relative_date_indices, weights_by_date)
+            heavy = float(self._xbris_p[self._xbris_p > self._xbris_p.min()].sum())
+            print(f"xbris: weighted draws over {len(valid)} training samples, "
+                  f"{int((self._xbris_p > self._xbris_p.min()).sum())} weighted up, "
+                  f"expected share of draws {heavy:.3f}", file=sys.stderr)
+        real = self.rng
+        self.rng = _WeightedChoice(real, valid, self._xbris_p)
+        gen = original(self)
+        try:
+            first = next(gen)
+        except StopIteration:
+            return
+        finally:
+            self.rng = real
+        yield first
+        yield from gen
+
+    __iter__._xbris_weighted = True
+    __iter__.__wrapped__ = original
+    cls.__iter__ = __iter__
+    label_text = f"{cls.__name__}: weighted training draws"
+    _APPLIED.append(label_text)
+    return label_text
+
+
+def oversample_from_env() -> str | None:
+    path = os.environ.get("XBRIS_OVERSAMPLE")
+    if not path:
+        return None
+    import json
+
+    with open(path) as f:
+        weights = {str(k): float(v) for k, v in json.load(f)["weights"].items()}
+    from anemoi.training.data.dataset.ensdataset import EnsNativeGridDataset
+
+    return weighted_training_draws(EnsNativeGridDataset, weights)
+
+
 def apply() -> list[str]:
     """Apply every patch this project needs. Safe to call more than once."""
     if os.environ.get("XBRIS_SEQUENTIAL_MEMBERS", "1") != "0":
@@ -93,4 +196,6 @@ def apply() -> list[str]:
         print(f"xbris: {'; '.join(_APPLIED)}", file=sys.stderr)
     else:
         print("xbris: sequential ensemble members OFF", file=sys.stderr)
+    if oversample_from_env():
+        print(f"xbris: training states drawn by weight from {os.environ['XBRIS_OVERSAMPLE']}", file=sys.stderr)
     return list(_APPLIED)

@@ -1,0 +1,24 @@
+# tail-mm: none   (read by finetune.sbatch: no tail term, so the units check runs on finetune)
+# CONTROL ARM + SPECTRAL, TRAINED ON TWO STEPS AT A TIME (ROLLOUT 2).
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_spectral_rollout2
+#   scripts/diff_configs.py finetune_spectral finetune_spectral_rollout2
+#
+# Every fine-tune so far is trained on one six-hour step, while Bris itself
+# was trained on six. The long-lead run showed the fine-tunes falling behind
+# on all precipitation from +12 h. This is finetune_spectral with the loss taken over
+# two steps of the model's own forecast, the cheapest rollout that tests it.
+# Same seed (20260909) and steps; scored by evaluation/rollout_plan.json.
+
+defaults:
+- finetune_spectral
+- _self_
+
+training:
+  max_steps: 2000
+  lr:
+    iterations: 3000
+  rollout:
+    start: 2
+    epoch_increment: 0
+    max: 2

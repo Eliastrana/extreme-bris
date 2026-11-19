@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-11-19",
+  "status": "FROZEN before any 16-member forecast of tailCfft2000 or controlfft2000 existed, and before any of the seed runs in evaluation/seed_spectral_plan.json was trained. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "More members for Pavo + spectral: sixteen members at inference, and the three seed draws pooled",
+  "origin": "Pavo with sixteen members beat Pavo with four by -0.00160 [-0.00273, -0.00087] in calibrated Brier at 20 mm and was level with the fifteen-member MEPS ensemble (+0.00015 [-0.00091, +0.00123]) on 98 117 station-days (evaluation/pavo_m16_plan.json). Pooling two seed draws of A into eight members gave -8.4 % against the pooled control arms, more than either draw. Pavo + spectral beat controlfft2000 by -3.9 % with four members on one draw (evaluation/pavo_spectral_plan.json). This plan asks whether that gain holds, and grows, with more members.",
+
+  "models": {
+    "tailCfft2000-m16": "~/bris-models/tailCfft2000/tailCfft2000-step002000_inference.ckpt with BRIS_MEMBERS=16, otherwise exactly as its four-member test-year forecasts",
+    "controlfft2000-m16": "~/bris-models/controlfft2000/controlfft2000-step002000_inference.ckpt with BRIS_MEMBERS=16, the same way",
+    "tailC2000-m16": "Pavo with sixteen members, already forecast (evaluation/pavo_m16_plan.json)",
+    "meps15": "the fifteen MEPS members of evaluation/pavo_m16_plan.json",
+    "pooled_tail": "tailCfft2000 + tailCfft2000s2 + tailCfft2000s3, four members each, joined into twelve (scripts/pool_seeds.py)",
+    "pooled_control": "controlfft2000 + controlfft2000s2 + controlfft2000s3, joined the same way"
+  },
+  "days": "Exactly the days tailC2000-m16 has, 160 days, every fifth day from 2025-08-01 and every fifth day from 2025-08-03 as that plan scheduled them, so all sixteen-member models are scored on the same days. Forecasts run on A100 80 GB cards (hgx2q), split into date chunks; a final pass fills any day a chunk lost.",
+
+  "test": "scripts/hits_and_calibration.py at +30 h, strict common cases of tailCfft2000-m16, controlfft2000-m16, tailC2000-m16, the four-member tailCfft2000 and controlfft2000, and every one of the fifteen MEPS members (scripts/meps_members_cases.py), --cv month --replicates 5000.",
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after month-out isotonic calibration, tailCfft2000-m16 minus controlfft2000-m16",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "key_secondary": {
+    "measure": "the same, tailCfft2000-m16 minus meps15",
+    "note": "reported with its interval; an upper bound below zero would mean better than the full MEPS ensemble, a lower bound above zero worse"
+  },
+
+  "registered_expectation": "Both sixteen-member models are better than their four-member forms, and the tail contrast at sixteen members is at least as large as at four (-0.00080). Reported whichever way it goes.",
+
+  "pooled_seeds": {
+    "when": "after the four runs of evaluation/seed_spectral_plan.json reach step 2000 and are forecast, on the full test year as that plan scores it",
+    "measure": "calibrated Brier at 20 mm, pooled_tail minus pooled_control, paired block bootstrap as above",
+    "status": "a pre-registered secondary of this plan; it does not replace the primary of the seed plan",
+    "registered_expectation": "the pooled contrast is more negative than the mean of the three single-draw contrasts"
+  },
+
+  "secondary_reported": [
+    "each sixteen-member model against its four-member form on the same days",
+    "the same at 10 and 50 mm; ROC area; frequency bias",
+    "tailCfft2000-m16 against tailC2000-m16, whether the spectral term matters with sixteen members",
+    "the pooled twelve-member ensembles against meps15 on the 160 days where both exist (exploratory)"
+  ],
+
+  "not_claimed": "One test year, one training draw for the sixteen-member models, 160 days. A pooled ensemble is three models, not one; it is reported as that."
+}

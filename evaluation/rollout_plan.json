@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-11-19",
+  "status": "FROZEN before either rollout run was trained and before any forecast of them existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "Rollout 2: does training on two steps keep Pavo + spectral's gain and stop the drift at longer leads?",
+  "origin": "Every fine-tune so far is trained on one six-hour step; Bris was trained on six. In the long-lead run (evaluation/long_lead_plan.json) Pavo was clearly worse than controlfft2000 on all six-hour precipitation from +12 to +60 h (fair CRPS +10.4 % at +48 h, +6.3 % at +60 h) and its heavy-rain gain was gone by +36 h. Pavo + spectral beat controlfft2000 at +30 h but has not been run beyond +36 h.",
+
+  "models": {
+    "tailCfft2000r2": "bris/train/finetune_tail_c_spectral_rollout2.yaml, seed 20260909, step 2000: ~/bris-models/tailCfft2000r2/tailCfft2000r2-step002000_inference.ckpt",
+    "controlfft2000r2": "bris/train/finetune_spectral_rollout2.yaml, seed 20260909, step 2000: ~/bris-models/controlfft2000r2/controlfft2000r2-step002000_inference.ckpt",
+    "tailCfft2000": "already trained; forecast for the test year, and here also to +60 h",
+    "controlfft2000": "already trained and forecast to +60 h every second day"
+  },
+  "training": "two runs on an H200, one at a time or both when two cards are free. Before them, one probe of each config with training.max_steps=2 dataloader.limit_batches.training=2 dataloader.limit_batches.validation=1 to see that rollout 2 fits in memory; a probe is not a result and nothing from it is scored. If rollout 2 does not fit, this plan is amended before any full run starts, and the amendment says why.",
+
+  "test": {
+    "primary": "exactly as evaluation/pavo_spectral_plan.json: 2025-08-01..2026-09-06, 4 members, BRIS_LEADTIMES=7, +30 h, strict common cases with tailCfft2000, controlfft2000 and MEPS, scripts/hits_and_calibration.py --cv month --replicates 5000 --meps",
+    "long_lead": "exactly as evaluation/long_lead_plan.json: every second day from 2025-08-01, 00 UTC, 4 members, BRIS_LEADTIMES=11, +6 to +60 h, six-hour precipitation against the hourly gauges, scripts/lead_scores.py --leads 6..60 --step-days 2 --no-meps, for tailCfft2000r2, controlfft2000r2, tailCfft2000 and controlfft2000 on common cases"
+  },
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after month-out isotonic calibration at +30 h, tailCfft2000r2 minus controlfft2000r2",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "key_secondary": {
+    "measure": "fair CRPS of all six-hour precipitation at +60 h, tailCfft2000r2 minus tailCfft2000, paired block bootstrap as in evaluation/long_lead_plan.json",
+    "positive_if": "the upper bound is below 0, rollout reduces the error at +60 h"
+  },
+
+  "registered_expectation": "Rollout 2 narrows Pavo + spectral's distance to controlfft2000 on all precipitation at +48 and +60 h, and the heavy-rain gain at 10 mm per 6 h lasts to at least +36 h. Reported whichever way it goes.",
+
+  "secondary_reported": [
+    "tailCfft2000r2 minus tailCfft2000 and controlfft2000r2 minus controlfft2000 at +30 h, calibrated Brier at 10, 20 and 50 mm",
+    "every lead from +6 to +60 h, calibrated Brier skill at 5, 10 and 20 mm per 6 h, and fair CRPS of all six-hour precipitation, for all four models",
+    "mean precipitation relative to observed and frequency bias",
+    "2 m temperature and 10 m wind against Frost with scripts/general_skill.py (exploratory)",
+    "spectra with scripts/spectra.py, every 12th day, +36 h (exploratory)"
+  ],
+
+  "not_claimed": "Rollout 2 only, one training draw per arm, step 2000, one test year. It does not show what rollout 6, Bris's own, would do."
+}

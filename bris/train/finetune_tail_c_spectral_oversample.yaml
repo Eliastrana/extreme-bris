@@ -1,0 +1,17 @@
+# tail-mm: none   (read by finetune.sbatch's threshold check)
+# oversample: ~/bris-runs/oversample/weights.json   (read by finetune.sbatch; sha256 df1f3d1eddac3b762a757764edf33e03f7fc746b49320d538fe2082a54c90fb8)
+# PAVO + SPECTRAL, WITH HEAVY-RAIN STATES DRAWN MORE OFTEN.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_c_spectral_oversample
+#   scripts/diff_configs.py finetune_tail_c_spectral finetune_tail_c_spectral_oversample
+#
+# The tail term only acts on the few heavy-rain states a batch happens to
+# hold. Here the 219 of 2 191 training states with the most area above 20 mm
+# in six hours (top tenth, scripts/oversample_weights.py) are drawn four
+# times as often, about 31 per cent of draws instead of 10, with replacement
+# (xbris.patches, weighted training draws). Validation is not reweighted.
+# Same seed (20260909) and steps; scored by evaluation/oversample_plan.json.
+
+defaults:
+- finetune_tail_c_spectral
+- _self_
