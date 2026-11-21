@@ -2,12 +2,17 @@
   "schema_version": 1,
   "frozen_at": "2026-11-19",
   "status": "FROZEN before either oversampling run was trained and before any forecast of them existed. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "amendment_1": {
+    "made_at": "2026-11-21",
+    "when": "after tailCfft2000os was trained and while controlfft2000os was training, with the same code, before any forecast of either existed; no result of this plan had been seen",
+    "what": "The sampling as run differs from the 'weights' and 'sampling' fields below. xbris.patches.sample_weights takes a sample's weight as the largest over relative_date_indices[1:], which with Bris's two input states includes the second input state (0 h) as well as the target. A start state is therefore weighted when either its 0 h state or its +6 h target is among the 219 weighted states. That gives 323 weighted samples, 2 x 219 minus the 115 where both are weighted, and an expected share of draws of 0.409, not 0.308.",
+    "decision": "Kept as run. Both runs of every contrast drew with exactly this weighting from the same code and the same weights.json, so each contrast remains like for like. The weighting is described in the paper as the tenth of training states with the largest area above 20 mm and the state just before each, at factor 4. The endpoints, contrasts, criteria and tests below are unchanged.",
+    "not_done": "The patch is not changed, so the two runs and any rerun use the same draws."
+  },
   "title": "Oversampling heavy-rain states: an alternative to the tail term, and a complement to it",
   "origin": "The tail term reweights the loss on the few heavy-rain states a batch holds, and Pavo + spectral's gain over controlfft2000 is sure at 10 and 20 mm but not shown at 50 mm (-2.0 % [-6.8, +2.8], 603 events). Drawing heavy states more often gives the model more of them to learn from, with or without the tail term.",
-
   "weights": "~/bris-runs/oversample/weights.json, sha256 df1f3d1eddac3b762a757764edf33e03f7fc746b49320d538fe2082a54c90fb8, from scripts/oversample_weights.py over ~/bris-runs/extremes/meps-year3.json and meps-year2.json, training period 2023-10-01..2025-03-31, measure area_ge_20, top 0.10, factor 4: 219 of 2191 states weighted, expected share of draws 0.308. Built before this plan was frozen, from the training data only.",
   "sampling": "xbris.patches weighted training draws: the training dataset draws with replacement by weight from its own seeded generator; validation and test are not reweighted; a sample's weight is the largest over its target dates.",
-
   "models": {
     "controlfft2000os": "bris/train/finetune_spectral_oversample.yaml, seed 20260909, step 2000: ~/bris-models/controlfft2000os/controlfft2000os-step002000_inference.ckpt",
     "tailCfft2000os": "bris/train/finetune_tail_c_spectral_oversample.yaml, seed 20260909, step 2000: ~/bris-models/tailCfft2000os/tailCfft2000os-step002000_inference.ckpt",
@@ -15,9 +20,7 @@
     "tailCfft2000": "seed 20260909, already forecast"
   },
   "training": "two runs on an H200. A run lost to the node is restarted from the beginning, unchanged.",
-
   "test": "exactly as evaluation/pavo_spectral_plan.json: 2025-08-01..2026-09-06, 4 members, BRIS_LEADTIMES=7, +30 h, strict common cases of all four models and MEPS, scripts/hits_and_calibration.py --cv month --replicates 5000 --meps, one --comparator per contrast.",
-
   "primary_endpoint": {
     "measure": "Brier score at 20 mm per day after month-out isotonic calibration, controlfft2000os minus controlfft2000: oversampling alone, as an alternative to the tail term",
     "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
@@ -25,14 +28,11 @@
     "negative_if": "the lower 95 percent bound is above 0",
     "otherwise": "inconclusive"
   },
-
   "key_secondary": {
     "measure": "the same, tailCfft2000os minus tailCfft2000: oversampling on top of the tail term",
     "positive_if": "the upper bound is below 0"
   },
-
   "registered_expectation": "Oversampling alone gives a smaller gain than the tail term (controlfft2000os is behind tailCfft2000), and on top of the tail term it adds most at 50 mm. Reported whichever way it goes.",
-
   "secondary_reported": [
     "controlfft2000os minus tailCfft2000, the two routes to the tail against each other",
     "tailCfft2000os minus controlfft2000",
@@ -41,6 +41,5 @@
     "2 m temperature and 10 m wind against Frost with scripts/general_skill.py (exploratory)",
     "against MEPS with four members"
   ],
-
   "not_claimed": "One weighting (top tenth by area above 20 mm, factor 4), one training draw per arm, step 2000, one test year."
 }
