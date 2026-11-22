@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-11-22",
+  "status": "FROZEN before any sixteen-member forecast of the published Bris existed. The results of evaluation/members_plan.json (tailCfft2000-m16, controlfft2000-m16, meps15 on the same days) HAD been seen when this plan was written; it adds a baseline to them and does not change that plan. The SHA-256 of this file is recorded in the commit that froze it.",
+  "title": "The published Bris with sixteen members, as the baseline for the sixteen-member results",
+  "origin": "evaluation/members_plan.json compared Pavo + spectral with the control arm + spectral and with the fifteen-member MEPS. The control arm is Bris fine-tuned a further 2000 steps on the same data, not Bris as MET published it. With four members the published Bris was behind the control arm (Brier skill score 0.357 against 0.364 at 20 mm). This plan puts the published model, unchanged, beside the others with as many members.",
+
+  "models": {
+    "bris-m16": "~/bris-models/bris-forecaster/bris-crpsfft_inference.ckpt, the checkpoint the four-member baseline forecasts used, with BRIS_MEMBERS=16, BRIS_LEADTIMES=7, otherwise exactly as tailCfft2000-m16 and controlfft2000-m16",
+    "tailCfft2000-m16": "already forecast",
+    "controlfft2000-m16": "already forecast",
+    "meps15": "as in evaluation/members_plan.json"
+  },
+  "days": "Exactly the 160 days of evaluation/members_plan.json, every fifth day from 2025-08-01 and from 2025-08-03, with the year-2 zarrs for 2025-08-01..2025-09-07 and the year-1 zarrs after.",
+
+  "test": "scripts/hits_and_calibration.py at +30 h on the strict common cases of bris-m16, tailCfft2000-m16, controlfft2000-m16 and every one of the fifteen MEPS members (scripts/meps_members_cases.py), --cv month --replicates 5000.",
+
+  "primary_endpoint": {
+    "measure": "Brier score at 20 mm per day after month-out isotonic calibration, tailCfft2000-m16 minus bris-m16",
+    "uncertainty": "paired block bootstrap, seven-day blocks, 5000 replicates",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "key_secondary": {
+    "measure": "the same, bris-m16 minus meps15",
+    "note": "where the published model stands against MET's operational ensemble with as many members"
+  },
+
+  "registered_expectation": "bris-m16 is behind tailCfft2000-m16 by at least as much as controlfft2000-m16 is, and behind meps15. Reported whichever way it goes.",
+
+  "secondary_reported": [
+    "controlfft2000-m16 minus bris-m16",
+    "the same at 10 and 50 mm; ROC area; frequency bias; hit rate and false-alarm share when half the members say yes"
+  ],
+
+  "not_claimed": "One test year, 160 days, +30 h. The sixteen-member contrasts of evaluation/members_plan.json are unchanged by this plan; if the common cases shrink because a bris-m16 day is missing, those contrasts are reported again on the smaller set beside the original numbers, never in place of them."
+}
