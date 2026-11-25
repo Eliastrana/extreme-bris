@@ -23,8 +23,10 @@ wherever the numbers are shown:
   - no lapse-rate correction for temperature: the station files carry no
     heights. Model differences are unaffected, the level is not
   - no MSLP: there are no pressure observations
-  - MEPS is the single member we have (its control run), scored as a
-    one-member ensemble (CRPS = absolute error); the paper used all 30
+  - MEPS is either its control run, scored as a one-member ensemble (CRPS =
+    absolute error), or with --meps-members the fifteen members valid from
+    00 UTC (five from 00Z, ten lagged from 22Z and 23Z), precipitation only,
+    at the daily gauges' nearest grid point; the paper used all 30
 
 Two steps. collect reads one model's files (one job per model, in parallel);
 combine aligns everything on (init, lead, station) and writes the figures'
@@ -187,6 +189,45 @@ def meps_cases(meps_dir: Path, obs: dict, name: str) -> dict:
     return {k: np.concatenate(v) for k, v in rows.items()}
 
 
+def meps_member_cases(pattern: str, obs: dict) -> dict:
+    """The MEPS ensemble from scripts/fetch_meps_members.py, precipitation only.
+
+    Six-hour amounts at the daily gauges' nearest grid point, cycles labelled
+    D 00Z and leads counted from it, for the five members of D 00Z and the ten
+    lagged ones of D-1 22Z and 23Z. A case is kept only where every member has
+    a value, so the ensemble is always complete."""
+    files = sorted(glob.glob(str(Path(pattern).expanduser())))
+    files = [f for f in files if not f.endswith("_val.npz")]
+    if not files:
+        raise SystemExit(f"no MEPS member files match {pattern}")
+    pos = {s: i for i, s in enumerate(obs["stations"])}
+    stack, ref = [], None
+    for f in files:
+        with np.load(f, allow_pickle=False) as z:
+            here = (tuple(z["stations"]), tuple(z["cycles"]), tuple(int(L) for L in z["leads"]))
+            if ref is None:
+                ref = here
+            elif here != ref:
+                raise SystemExit(f"{f}: stations, cycles or leads differ from the first member file")
+            stack.append(z["values"].astype("float64"))
+    stations, cycles, leads = ref
+    vals = np.stack(stack, axis=-1)                       # station, cycle, lead, member
+    idx = np.array([pos.get(s, -1) for s in stations])
+    lead_pos = {L: i for i, L in enumerate(leads)}
+    rows = {"init": [], "lead": [], "station": [], "ens": []}
+    for ci, cyc in enumerate(cycles):
+        init = np.datetime64(cyc[:10], "D")
+        for L in LEADS:
+            v = vals[:, ci, lead_pos[L], :]
+            ok = np.isfinite(v).all(axis=1) & (idx >= 0)
+            rows["init"].append(np.full(int(ok.sum()), init))
+            rows["lead"].append(np.full(int(ok.sum()), L, dtype="int16"))
+            rows["station"].append(idx[ok].astype("int32"))
+            rows["ens"].append(np.clip(v[ok], 0.0, None))
+    print(f"  MEPS ensemble: {len(files)} members, {sum(len(r) for r in rows['init']):,} precipitation cases")
+    return {k: np.concatenate(v) for k, v in rows.items()}
+
+
 def fair_crps(ens: np.ndarray, obs: np.ndarray) -> np.ndarray:
     m = ens.shape[1]
     t1 = np.abs(ens - obs[:, None]).mean(axis=1)
@@ -213,11 +254,14 @@ def combine(args: argparse.Namespace) -> int:
         sets = {lab: {k: d[f"{n}_{k}"] for k in ("init", "lead", "station", "obs", "ens")} for lab, d in data.items()}
         if args.meps_dir:
             sets["MEPS"] = meps_cases(args.meps_dir.expanduser(), obs_dirs[n], n)
+        if args.meps_members and n == "precipitation":
+            sets[f"MEPS{len([f for f in glob.glob(str(Path(args.meps_members).expanduser())) if not f.endswith('_val.npz')])}"] = \
+                meps_member_cases(args.meps_members, obs_dirs[n])
         keys = {lab: key(s["init"], s["lead"], s["station"]) for lab, s in sets.items()}
         common = None
         for k in keys.values():
             common = k if common is None else np.intersect1d(common, k)
-        ref = next(lab for lab in sets if lab != "MEPS")
+        ref = next(lab for lab in sets if not lab.startswith("MEPS"))
         aligned = {}
         for lab, s in sets.items():
             order = np.argsort(keys[lab])
@@ -299,6 +343,8 @@ def main() -> int:
     m.add_argument("--cases", nargs="+", required=True)
     m.add_argument("--obs-dir", type=Path, required=True)
     m.add_argument("--meps-dir", type=Path, default=None)
+    m.add_argument("--meps-members", default=None, metavar="GLOB",
+                   help="MEPS member files (fetch_meps_members.py); the full ensemble joins precipitation only")
     m.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     return collect(args) if args.cmd == "collect" else combine(args)
