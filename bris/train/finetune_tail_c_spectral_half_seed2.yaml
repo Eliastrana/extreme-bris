@@ -1,0 +1,14 @@
+# tail-mm: none   (read by finetune.sbatch's threshold check)
+# base-seed: 20261003   (read by finetune.sbatch; the seed of finetune_tail_c_spectral_seed2 and finetune_spectral_seed2, see evaluation/half_dose_plan.json)
+# PAVO + SPECTRAL AT HALF DOSE, DRAW 2: THE SAME RUN WITH ANOTHER SEED.
+#
+#   sbatch bris/slurm/finetune.sbatch finetune_tail_c_spectral_half_seed2
+#   scripts/diff_configs.py finetune_tail_c_spectral_half finetune_tail_c_spectral_half_seed2
+#
+# Nothing but the seed differs from finetune_tail_c_spectral_half. The seed is
+# that of draw 2 of Pavo + spectral and of the control arm with the spectral
+# term, so the three share sample order and ensemble noise.
+
+defaults:
+- finetune_tail_c_spectral_half
+- _self_

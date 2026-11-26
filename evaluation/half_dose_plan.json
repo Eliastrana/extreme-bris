@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-11-26",
+  "status": "FROZEN before any of the three runs is trained and before any forecast of them exists. The SHA-256 of this file is recorded in the commit that froze it. Amendments only before any result is seen.",
+  "title": "Pavo + spectral at half its tail dose: less wet, and better than the control arm in the raw forecast?",
+  "origin": "MET (reply of 2026-11-26) judge an improvement of Bris on the raw forecast, not after calibration, and found the raw effect so far negligible. In the raw forecast Pavo + spectral ranks wet days best but forecasts heavy rain too often: over 20 mm per 6 h it said yes in 0.25 % of cases against 0.19 % observed, and was +5.3 % [+0.8, +10.1] worse than the control arm with the spectral term in raw Brier (fifteen members, 160 days, paper-figures-m15n, exploratory). Across its three draws the raw Brier at 20 mm per day followed the wetness: frequency bias 1.14, 1.06 and 0.90 gave +2.3, -1.6 and -3.8 % against the control arm on the same seed. A third of Pavo's dose without the spectral term (E) moved the bias only from 1.41 to 1.32, so this plan halves the dose with the spectral term kept, on all three seeds, so that each new run is paired with a control arm and a full-dose run that already exist.",
+
+  "models": {
+    "tailCfft2000h": "bris/train/finetune_tail_c_spectral_half.yaml, loss_weights [1.0, 0.1, 19.545], seed 20260909, step 2000: ~/bris-models/tailCfft2000h/tailCfft2000h-step002000_inference.ckpt",
+    "tailCfft2000hs2": "bris/train/finetune_tail_c_spectral_half_seed2.yaml, seed 20261003, step 2000",
+    "tailCfft2000hs3": "bris/train/finetune_tail_c_spectral_half_seed3.yaml, seed 20261024, step 2000",
+    "controlfft2000, controlfft2000s2, controlfft2000s3": "the control arm with the spectral term on the same three seeds, already trained and forecast for the test year",
+    "tailCfft2000, tailCfft2000s2, tailCfft2000s3": "Pavo + spectral at full dose on the same three seeds, already trained and forecast for the test year"
+  },
+  "pairs": "Each half-dose draw against the control arm with the spectral term on the same seed: tailCfft2000h with controlfft2000, tailCfft2000hs2 with controlfft2000s2, tailCfft2000hs3 with controlfft2000s3. Same seed means the same sample order and ensemble noise, so a pair differs by the tail term alone.",
+  "training": "three runs, bris/slurm/finetune.sbatch with each config, on an H200 whenever one is free, two at a time at most. A run lost to the node is restarted from the beginning, unchanged. A run that does not reach step 2 000 is reported as missing and its pair dropped from the average, with the count stated.",
+  "forecasts": "as for the seed plan: 2025-08-01..2026-09-06, 00 UTC, 4 members, BRIS_LEADTIMES=7, into ~/bris-runs/evaluation/<tag>/. Forecasts may be split into date chunks; a final pass fills any day a chunk lost to the cluster.",
+
+  "test": "Raw six-hour precipitation, the way Nordhagen et al. (2025, arXiv:2511.23043) verify Bris, with the interpolation MET asked for: scripts/paper_figures.py collect --interpolation nearest for all nine models, leads 6 to 36 h pooled, six-hour gauge sums from Frost after the QC in paper_figures.py, the strict common cases of all nine models. No calibration of any kind in the primary endpoint.",
+
+  "primary_endpoint": {
+    "measure": "raw Brier score for more than 20 mm per 6 h, leads 6 to 36 h pooled, the mean over the three pairs of half dose minus control, taken case by case before the bootstrap",
+    "uncertainty": "paired block bootstrap over initialisation dates, seven-day blocks, 5000 replicates, with scripts/seed_contrast.py extended to six-hour cases and raw scores before any forecast of the new runs is scored",
+    "positive_if": "the upper 95 percent bound is below 0",
+    "negative_if": "the lower 95 percent bound is above 0",
+    "otherwise": "inconclusive"
+  },
+
+  "key_secondary": {
+    "measure": "the same, half dose minus full dose on the same seed (tailCfft2000h minus tailCfft2000, and for seeds 2 and 3): whether halving the dose improves the raw forecast over Pavo + spectral as it is",
+    "uncertainty": "as the primary"
+  },
+
+  "registered_expectation": "The six-hour frequency bias over 20 mm (mean forecast probability over observed frequency) of each half-dose draw lies below that of the full-dose draw on the same seed and within 0.9 to 1.1, and the primary endpoint is positive. Reported whichever way it goes.",
+
+  "secondary_reported": [
+    "each pair on its own, raw Brier per 6 h at 0.5, 1, 2, 5, 10, 15 and 20 mm, against the control arm and against the full dose",
+    "the mean over pairs at 1 and 10 mm per 6 h, the thresholds where a drier Pavo could lose what it has",
+    "raw Brier per day at +30 h over 10, 20 and 50 mm (scripts/hits_and_calibration.py, its raw rows), the mean over pairs",
+    "fair CRPS of six-hour precipitation per lead, and of daily precipitation over all station-days with mean precipitation relative to observed (scripts/precip_overall.py)",
+    "frequency bias per 6 h and per day for all nine models",
+    "calibrated Brier and ROC area per day at 20 mm, as a measure of ranking only",
+    "2 m temperature and 10 m wind against Frost with scripts/general_skill.py (exploratory)",
+    "against MEPS with four members per 6 h and per day, the same cell and the same number of members (exploratory)"
+  ],
+
+  "decision": "If the primary endpoint is positive, the half dose replaces Pavo + spectral as the candidate, and the sixteen-member run on the 160 days is repeated with it against MEPS with fifteen members, raw. If the frequency bias falls but the primary is inconclusive, the dose is not the lever and the next plan targets the spread of the precipitation ensemble directly.",
+
+  "not_claimed": "Three draws at step 2000 on one test year, four members. One step at a time in training (rollout 1). A pass shows the half dose is better than the control arm in the raw forecast over 20 mm per 6 h at leads up to 36 h; it does not show the dose is the best one, and four members cannot show the raw score MET would see from a full ensemble."
+}
