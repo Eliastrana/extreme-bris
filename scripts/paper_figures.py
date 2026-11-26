@@ -120,9 +120,14 @@ def collect(args: argparse.Namespace) -> int:
                 lat = np.asarray(ds["latitude"].values, dtype="float64")
                 lon = np.asarray(ds["longitude"].values, dtype="float64")
                 for n, o in obs.items():
-                    _, dist = nearest(o["lat"], o["lon"], lat.ravel(), lon.ravel())
+                    idx, dist = nearest(o["lat"], o["lon"], lat.ravel(), lon.ravel())
                     keep = np.flatnonzero(dist <= args.max_distance_km)
-                    corners[n] = (keep, ev.bilinear_corners(ds, o["lat"][keep], o["lon"][keep], Path(path)))
+                    if args.interpolation == "nearest":
+                        # the cell itself, as the MEPS members are fetched (fetch_meps_members.py)
+                        r, c = np.unravel_index(idx[keep], lat.shape)
+                        corners[n] = (keep, [(r, c, np.ones(keep.size))])
+                    else:
+                        corners[n] = (keep, ev.bilinear_corners(ds, o["lat"][keep], o["lon"][keep], Path(path)))
             times = np.asarray(ds["time"].values).astype("datetime64[h]")
             init = times[0]
             leads = ((times - init) / np.timedelta64(1, "h")).astype(int)
@@ -246,7 +251,8 @@ def combine(args: argparse.Namespace) -> int:
     data = {}
     for f in files:
         with np.load(f, allow_pickle=False) as z:
-            data[str(z["label"])] = {k: z[k] for k in z.files if k != "label"}
+            data[str(z["label"])] = {k: (z[k][:, :args.members] if args.members and k.endswith("_ens") else z[k])
+                                     for k in z.files if k != "label"}
     obs_dirs = {n: load_obs(args.obs_dir.expanduser(), n) for n in VARS}
     out = {"exploratory": True, "reference": "Nordhagen et al. (2025), arXiv:2511.23043",
            "leads_hours": LEADS, "variables": {}}
@@ -338,6 +344,8 @@ def main() -> int:
     c.add_argument("--model", required=True, metavar="LABEL=GLOB")
     c.add_argument("--obs-dir", type=Path, required=True)
     c.add_argument("--max-distance-km", type=float, default=5.0)
+    c.add_argument("--interpolation", choices=["bilinear", "nearest"], default="bilinear",
+                   help="bilinear as the paper; nearest to match the MEPS members, which exist only at the nearest cell")
     c.add_argument("--out", type=Path, required=True)
     m = sub.add_parser("combine")
     m.add_argument("--cases", nargs="+", required=True)
@@ -345,6 +353,8 @@ def main() -> int:
     m.add_argument("--meps-dir", type=Path, default=None)
     m.add_argument("--meps-members", default=None, metavar="GLOB",
                    help="MEPS member files (fetch_meps_members.py); the full ensemble joins precipitation only")
+    m.add_argument("--members", type=int, default=None,
+                   help="keep the first N members of every model ensemble (not MEPS), to match MEPS member for member")
     m.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     return collect(args) if args.cmd == "collect" else combine(args)

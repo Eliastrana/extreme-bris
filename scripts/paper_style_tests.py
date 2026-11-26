@@ -50,13 +50,14 @@ PAIRS = [("Pavo", "Control"), ("Pavo", "Bris"), ("Control", "Bris"),
          ("Pavo", "MEPS15"), ("Control", "MEPS15"), ("Bris", "MEPS15")]
 
 
-def six_hour_cases(paths: list[Path], meps_glob: str, obs_dir: Path) -> tuple[dict, np.ndarray, np.ndarray]:
+def six_hour_cases(paths: list[Path], meps_glob: str, obs_dir: Path, members: int | None = None) -> tuple[dict, np.ndarray, np.ndarray]:
     """Aligned precipitation ensembles, observations and init dates, as paper_figures.combine aligns them."""
     obs_all = pf.load_obs(obs_dir, "precipitation")
     sets = {}
     for p in paths:
         with np.load(p, allow_pickle=False) as z:
             sets[NAMES[str(z["label"])]] = {k: z[f"precipitation_{k}"] for k in ("init", "lead", "station", "ens")}
+            sets[NAMES[str(z["label"])]]["ens"] = sets[NAMES[str(z["label"])]]["ens"][:, :members]
     sets["MEPS15"] = pf.meps_member_cases(meps_glob, obs_all)
     keys = {lab: pf.key(s["init"], s["lead"], s["station"]) for lab, s in sets.items()}
     common = None
@@ -126,18 +127,21 @@ def main() -> int:
     ap.add_argument("--obs-dir", type=Path, required=True)
     ap.add_argument("--daily", type=Path, required=True)
     ap.add_argument("--replicates", type=int, default=5000)
+    ap.add_argument("--members", type=int, default=None,
+                    help="keep the first N members of every model ensemble (not MEPS)")
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
-    res = {"exploratory": True, "replicates": args.replicates,
+    res = {"exploratory": True, "replicates": args.replicates, "model_members": args.members,
            "note": "Brier differences are a minus b; negative favours a. Percent is of b's mean Brier score."}
     print("===== A and B: six-hour precipitation, leads 6 to 36 h, raw and calibrated")
-    ens, obs, dates = six_hour_cases([p.expanduser() for p in args.cases], args.meps_members, args.obs_dir.expanduser())
+    ens, obs, dates = six_hour_cases([p.expanduser() for p in args.cases], args.meps_members, args.obs_dir.expanduser(),
+                                    args.members)
     res["six_hour"] = {"cases": int(obs.size), "thresholds": score(ens, obs, dates, SIX_HOUR, args.replicates)}
 
     print("\n===== C: daily precipitation at +30 h, the station-days of evaluation/bris_m16_plan.json")
     with np.load(args.daily.expanduser(), allow_pickle=True) as z:
-        daily = {lab: z[f"model_{key}_30"] for key, lab in NAMES.items()}
+        daily = {lab: z[f"model_{key}_30"][:, :args.members] for key, lab in NAMES.items()}
         daily["MEPS15"] = z["model_meps15_30"]
         dobs, ddates = z["obs_30"].astype("float64"), z["dates_30"].astype("datetime64[D]")
     res["daily"] = {"cases": int(dobs.size), "thresholds": score(daily, dobs, ddates, DAILY, args.replicates)}
